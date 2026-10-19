@@ -354,7 +354,7 @@ private fun VoiceSection(viewModel: TourViewModel) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         else -> Column {
-            VoiceRow("Default voice", null, chosen[selected] == null, onSelect = { viewModel.settings.setVoice(selected, null) },
+            VoiceRow("Automatic (best installed voice)", null, chosen[selected] == null, onSelect = { viewModel.settings.setVoice(selected, null) },
                 onPlay = { viewModel.previewVoice(selected, null, sample) })
             voices.forEachIndexed { index, voice ->
                 val region = voice.locale.displayCountry

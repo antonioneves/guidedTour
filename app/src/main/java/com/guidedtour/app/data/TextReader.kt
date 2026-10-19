@@ -4,6 +4,8 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -47,6 +49,7 @@ class TextReader private constructor(context: Context) {
             instance ?: synchronized(this) { instance ?: TextReader(context.applicationContext).also { instance = it } }
     }
 
+    private val appContext = context
     private val main = Handler(Looper.getMainLooper())
     private val settings = Settings.get(context)
     private val audio = context.getSystemService(AudioManager::class.java)
@@ -74,7 +77,6 @@ class TextReader private constructor(context: Context) {
     private val _speechReady = MutableStateFlow(false)
     /** True once the speech engine has started and voices can be listed. */
     val speechReady: StateFlow<Boolean> = _speechReady
-    private var explicitVoiceSet = false
     private var pending: (() -> Unit)? = null
     private val tts: TextToSpeech = TextToSpeech(context) { status ->
         ready = status == TextToSpeech.SUCCESS
@@ -218,26 +220,33 @@ class TextReader private constructor(context: Context) {
             effective = Locale.getDefault()
             tts.setLanguage(effective)
         }
-        val voices = tts.voices.orEmpty()
-        val chosen = chosenName?.let { name -> voices.firstOrNull { it.name == name } }
-        if (chosen != null) {
-            tts.voice = chosen
-            explicitVoiceSet = true
-        } else if (explicitVoiceSet) {
-            // A voice was forced earlier; setLanguage alone may keep it, so go back to the best default.
-            explicitVoiceSet = false
-            sortedVoices(effective.language).let { list -> list.firstOrNull { it.locale == effective } ?: list.firstOrNull() }
-                ?.let { tts.voice = it }
-        }
+        val chosen = chosenName?.let { name -> tts.voices.orEmpty().firstOrNull { it.name == name } }
+        (chosen ?: bestVoice(effective))?.let { tts.voice = it }
         tts.setSpeechRate(settings.rate.value)
         tts.setPitch(settings.pitch.value)
     }
 
+    /** Installed voices for [language], highest quality first (offline before online at equal quality). */
     private fun sortedVoices(language: String): List<Voice> = runCatching {
         tts.voices.orEmpty()
             .filter { it.locale.language == language && !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
-            .sortedWith(compareBy<Voice> { it.isNetworkConnectionRequired }.thenByDescending { it.quality }.thenBy { it.name })
+            .sortedWith(compareByDescending<Voice> { it.quality }.thenBy { it.isNetworkConnectionRequired }.thenBy { it.name })
     }.getOrDefault(emptyList())
+
+    /**
+     * The voice used when the user hasn't picked one: the best-quality installed voice, preferring the
+     * phone's own region (US vs UK English) and skipping online-only voices while offline.
+     */
+    private fun bestVoice(locale: Locale): Voice? {
+        val usable = sortedVoices(locale.language).filter { !it.isNetworkConnectionRequired || isOnline() }
+        val region = locale.country.ifBlank { Locale.getDefault().country }
+        return usable.firstOrNull { it.locale.country == region } ?: usable.firstOrNull()
+    }
+
+    private fun isOnline(): Boolean = runCatching {
+        val manager = appContext.getSystemService(ConnectivityManager::class.java)
+        manager.getNetworkCapabilities(manager.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    }.getOrDefault(false)
 
     /** Installed voices for [language] (e.g. "en"), best first. Empty until [speechReady]. */
     fun voicesFor(language: String): List<Voice> = if (ready) sortedVoices(language) else emptyList()
