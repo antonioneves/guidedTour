@@ -8,8 +8,8 @@ thumbnails.
 
 ## Status (2026-10-19)
 
-All items below are implemented except a voice picker (only speed and pitch exist) and a migration
-test. Checked on the emulator: visit grouping, play visit and the queue, queue sheet, settings sheet,
+All items below are implemented except a migration test. The voice picker (per-language voice with
+a spoken sample) is in the settings sheet. Checked on the emulator: visit grouping, play visit and the queue, queue sheet, settings sheet,
 translation (stored and shown on the card), no-key map message, camera kept alive across tabs.
 Not exercised: thumbnails and photo OCR (the emulator camera has no text), editing text, volume
 shutter, route line (needs a Maps key), non-Latin OCR, TalkBack.

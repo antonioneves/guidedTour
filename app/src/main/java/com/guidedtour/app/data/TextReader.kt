@@ -7,6 +7,7 @@ import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
 import android.speech.tts.UtteranceProgressListener
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -73,11 +74,16 @@ class TextReader private constructor(context: Context) {
     private var resumeOnFocusGain = false
 
     private var ready = false
+    private val _speechReady = MutableStateFlow(false)
+    /** True once the speech engine has started and voices can be listed. */
+    val speechReady: StateFlow<Boolean> = _speechReady
+    private var explicitVoiceSet = false
     private var pending: (() -> Unit)? = null
     private val tts: TextToSpeech = TextToSpeech(context) { status ->
         ready = status == TextToSpeech.SUCCESS
         if (ready) {
             tts.setAudioAttributes(speechAttributes)
+            _speechReady.value = true
             pending?.invoke()
         }
         pending = null
@@ -198,18 +204,57 @@ class TextReader private constructor(context: Context) {
             val item = queue.getOrNull(index) ?: return@run
             val chunk = chunks.getOrNull(chunkIndex) ?: return@run
             val locale = localeFor(item.languageTag)
-            val result = tts.setLanguage(locale)
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                tts.setLanguage(Locale.getDefault())
-            }
-            tts.setSpeechRate(settings.rate.value)
-            tts.setPitch(settings.pitch.value)
+            configureVoice(locale, settings.voices.value[locale.language])
             val id = ++generation
             if (tts.speak(chunk.text, TextToSpeech.QUEUE_FLUSH, null, id.toString()) == TextToSpeech.ERROR) {
                 onChunkFinished(id.toString())
             }
         }
         if (ready) run() else pending = run
+    }
+
+    /** Picks the language, the user's chosen voice for it (if still installed), speed and pitch. */
+    private fun configureVoice(locale: Locale, chosenName: String?) {
+        val result = tts.setLanguage(locale)
+        var effective = locale
+        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+            effective = Locale.getDefault()
+            tts.setLanguage(effective)
+        }
+        val voices = tts.voices.orEmpty()
+        val chosen = chosenName?.let { name -> voices.firstOrNull { it.name == name } }
+        if (chosen != null) {
+            tts.voice = chosen
+            explicitVoiceSet = true
+        } else if (explicitVoiceSet) {
+            // A voice was forced earlier; setLanguage alone may keep it, so go back to the best default.
+            explicitVoiceSet = false
+            sortedVoices(effective.language).let { list -> list.firstOrNull { it.locale == effective } ?: list.firstOrNull() }
+                ?.let { tts.voice = it }
+        }
+        tts.setSpeechRate(settings.rate.value)
+        tts.setPitch(settings.pitch.value)
+    }
+
+    private fun sortedVoices(language: String): List<Voice> = runCatching {
+        tts.voices.orEmpty()
+            .filter { it.locale.language == language && !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
+            .sortedWith(compareBy<Voice> { it.isNetworkConnectionRequired }.thenByDescending { it.quality }.thenBy { it.name })
+    }.getOrDefault(emptyList())
+
+    /** Installed voices for [language] (e.g. "en"), best first. Empty until [speechReady]. */
+    fun voicesFor(language: String): List<Voice> = if (ready) sortedVoices(language) else emptyList()
+
+    /** Speaks [sample] with [voiceName] (or the default voice if null) so the user can compare. Pauses reading. */
+    fun preview(language: String, voiceName: String?, sample: String) {
+        if (!ready) return
+        pause()
+        configureVoice(Locale.forLanguageTag(language), voiceName)
+        tts.speak(sample, TextToSpeech.QUEUE_FLUSH, null, "preview")
+    }
+
+    fun stopPreview() {
+        if (!playing) tts.stop()
     }
 
     private fun onChunkFinished(utteranceId: String?) {

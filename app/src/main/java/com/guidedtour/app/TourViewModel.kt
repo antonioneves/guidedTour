@@ -140,6 +140,11 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     fun addToQueue(scan: Scan, translated: Boolean = false) { reader.enqueue(scan.item(translated), next = false); start() }
     fun playAll(scans: List<Scan>) { reader.playAll(scans.map { it.item(false) }); start() }
 
+    val speechReady: StateFlow<Boolean> = reader.speechReady
+    fun voicesFor(language: String) = reader.voicesFor(language)
+    fun previewVoice(language: String, voiceName: String?, sample: String) = reader.preview(language, voiceName, sample)
+    fun stopPreview() = reader.stopPreview()
+
     fun togglePlayback() = reader.toggle()
     fun pause() = reader.pause()
     fun next() = reader.next()

@@ -33,6 +33,18 @@ class Settings private constructor(context: Context) {
     )
     val script: StateFlow<OcrScript> = _script
 
+    /** Chosen TextToSpeech voice name per language code (e.g. "es"); no entry means the default voice. */
+    private val _voices = MutableStateFlow(
+        prefs.all.filterKeys { it.startsWith("voice.") }.entries
+            .associate { it.key.removePrefix("voice.") to it.value.toString() }
+    )
+    val voices: StateFlow<Map<String, String>> = _voices
+
+    fun setVoice(language: String, voiceName: String?) {
+        _voices.value = if (voiceName == null) _voices.value - language else _voices.value + (language to voiceName)
+        prefs.edit().apply { if (voiceName == null) remove("voice.$language") else putString("voice.$language", voiceName) }.apply()
+    }
+
     fun setRate(value: Float) { _rate.value = value; prefs.edit().putFloat("rate", value).apply() }
     fun setPitch(value: Float) { _pitch.value = value; prefs.edit().putFloat("pitch", value).apply() }
     fun setQueueNewScans(value: Boolean) { _queueNewScans.value = value; prefs.edit().putBoolean("queueNewScans", value).apply() }

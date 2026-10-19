@@ -3,6 +3,9 @@ package com.guidedtour.app.ui
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.material3.RadioButton
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Close
@@ -216,7 +221,10 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
     val script by settings.script.collectAsStateWithLifecycle()
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Text("Settings", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
 
             Text("Speech speed: ${"%.1f".format(Locale.US, rate)}×", style = MaterialTheme.typography.titleSmall)
@@ -224,6 +232,8 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
 
             Text("Voice pitch: ${"%.1f".format(Locale.US, pitch)}", style = MaterialTheme.typography.titleSmall)
             Slider(pitch, { settings.setPitch((it * 10).toInt() / 10f) }, valueRange = 0.7f..1.3f, steps = 5)
+
+            VoiceSection(viewModel)
 
             SwitchRow(
                 "Queue new scans",
@@ -297,4 +307,76 @@ fun EditTextDialog(initial: String, onDismiss: () -> Unit, onSave: (String) -> U
         confirmButton = { TextButton(onClick = { onSave(text); onDismiss() }, enabled = text.isNotBlank()) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/** Lets the user choose which installed voice reads each language, with a spoken sample. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun VoiceSection(viewModel: TourViewModel) {
+    val ready by viewModel.speechReady.collectAsStateWithLifecycle()
+    val chosen by viewModel.settings.voices.collectAsStateWithLifecycle()
+    val scans by viewModel.scans.collectAsStateWithLifecycle()
+    val languages = remember(scans) {
+        (listOf(Locale.getDefault().language) + scans.mapNotNull { it.languageTag?.let { tag -> Locale.forLanguageTag(tag).language } })
+            .filter { it.isNotBlank() }.distinct()
+    }
+    var selected by remember { mutableStateOf(languages.first()) }
+    DisposableEffect(Unit) { onDispose { viewModel.stopPreview() } }
+
+    Text("Voice", style = MaterialTheme.typography.titleSmall)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        languages.forEach { code ->
+            FilterChip(
+                selected = selected == code,
+                onClick = { viewModel.stopPreview(); selected = code },
+                label = { Text(Locale.forLanguageTag(code).getDisplayLanguage().replaceFirstChar { it.titlecase() }) },
+            )
+        }
+    }
+    val voices = remember(ready, selected) { viewModel.voicesFor(selected) }
+    val languageName = Locale.forLanguageTag(selected).displayLanguage
+    val sample = remember(scans, selected) {
+        scans.firstOrNull { it.languageTag?.let { tag -> Locale.forLanguageTag(tag).language } == selected }
+            ?.text?.take(120)?.substringBeforeLast(' ', "")?.takeIf { it.isNotBlank() }
+            ?: "Hello, this is how I sound in $languageName."
+    }
+    when {
+        !ready -> Text("Loading voices…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        voices.isEmpty() -> Text(
+            "No voices installed for $languageName. Add one in Android Settings, Text-to-speech.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        else -> Column {
+            VoiceRow("Default voice", null, chosen[selected] == null, onSelect = { viewModel.settings.setVoice(selected, null) },
+                onPlay = { viewModel.previewVoice(selected, null, sample) })
+            voices.forEachIndexed { index, voice ->
+                val region = voice.locale.displayCountry
+                val detail = listOfNotNull(
+                    if (voice.quality >= 400) "high quality" else null,
+                    if (voice.isNetworkConnectionRequired) "needs internet" else null,
+                ).joinToString(", ").ifEmpty { null }
+                VoiceRow(
+                    "Voice ${index + 1}" + if (region.isNotBlank()) " · $region" else "", detail, chosen[selected] == voice.name,
+                    onSelect = { viewModel.settings.setVoice(selected, voice.name) },
+                    onPlay = { viewModel.previewVoice(selected, voice.name, sample) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceRow(title: String, detail: String?, selected: Boolean, onSelect: () -> Unit, onPlay: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null, modifier = Modifier.padding(end = 12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        IconButton(onClick = onPlay) { Icon(Icons.Filled.PlayArrow, "Play a sample of $title") }
+    }
 }
