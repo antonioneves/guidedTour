@@ -1,0 +1,335 @@
+package com.guidedtour.app.ui
+
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.automirrored.outlined.Notes
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.outlined.Place
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.guidedtour.app.TourViewModel
+import com.guidedtour.app.data.PlayerState
+import com.guidedtour.app.data.Scan
+import com.guidedtour.app.data.Translator
+import com.guidedtour.app.data.Visit
+import com.guidedtour.app.data.groupVisits
+import kotlinx.coroutines.launch
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun TextsScreen(viewModel: TourViewModel, onOpenSettings: () -> Unit) {
+    val scans by viewModel.scans.collectAsStateWithLifecycle()
+    val player by viewModel.player.collectAsStateWithLifecycle()
+    val translating by viewModel.translating.collectAsStateWithLifecycle()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var query by remember { mutableStateOf("") }
+    var onlyFavorites by remember { mutableStateOf(false) }
+
+    val visible = remember(scans, query, onlyFavorites) {
+        scans.filter { scan ->
+            (!onlyFavorites || scan.favorite) &&
+                (query.isBlank() || listOf(scan.text, scan.translation, scan.placeName).any { it?.contains(query, ignoreCase = true) == true })
+        }
+    }
+    val visits = remember(visible) { groupVisits(visible) }
+
+    Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top),
+        topBar = {
+            LargeFlexibleTopAppBar(
+                title = { Text("Scanned texts") },
+                subtitle = { Text(if (scans.size == 1) "1 text saved" else "${scans.size} texts saved") },
+                actions = { IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings") } },
+                scrollBehavior = scrollBehavior,
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { padding ->
+        if (scans.isEmpty()) {
+            EmptyState(Modifier.padding(padding))
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 8.dp, bottom = 24.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item(key = "search") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Search texts and places") },
+                            leadingIcon = { Icon(Icons.Filled.Search, null) },
+                            trailingIcon = {
+                                if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, "Clear search") }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(28.dp),
+                        )
+                        FilterChip(
+                            selected = onlyFavorites,
+                            onClick = { onlyFavorites = !onlyFavorites },
+                            label = { Text("Favourites") },
+                            leadingIcon = { Icon(Icons.Filled.Star, null, Modifier.size(18.dp)) },
+                        )
+                    }
+                }
+                if (visible.isEmpty()) {
+                    item(key = "none") {
+                        Text("No texts match.", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                visits.forEach { visit ->
+                    item(key = "visit-${visit.id}") { VisitHeader(visit, onPlay = { viewModel.playAll(visit.chronological) }) }
+                    items(visit.scans, key = { it.id }) { scan ->
+                        val swipe = rememberSwipeToDismissBoxState(
+                            confirmValueChange = { target ->
+                                if (target == SwipeToDismissBoxValue.EndToStart) {
+                                    viewModel.delete(scan)
+                                    scope.launch {
+                                        snackbar.currentSnackbarData?.dismiss()
+                                        val result = snackbar.showSnackbar("Text deleted", actionLabel = "Undo")
+                                        if (result == SnackbarResult.ActionPerformed) viewModel.restore(scan)
+                                    }
+                                    true
+                                } else false
+                            },
+                        )
+                        SwipeToDismissBox(
+                            state = swipe,
+                            enableDismissFromStartToEnd = false,
+                            backgroundContent = {
+                                Box(
+                                    Modifier.fillMaxSize().clip(CardDefaults.shape).padding(horizontal = 24.dp),
+                                    contentAlignment = Alignment.CenterEnd,
+                                ) {
+                                    Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error)
+                                }
+                            },
+                        ) {
+                            ScanCard(scan, player, scan.id in translating, viewModel)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VisitHeader(visit: Visit, onPlay: () -> Unit) {
+    val day = visit.day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+    val title = visit.place?.let { "$it · $day" } ?: day
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            Text(
+                if (visit.scans.size == 1) "1 text" else "${visit.scans.size} texts",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (visit.scans.size > 1) {
+            TextButton(onClick = onPlay) {
+                Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text("Play visit")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScanCard(scan: Scan, player: PlayerState, translating: Boolean, viewModel: TourViewModel) {
+    var expanded by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    val current = player.current?.takeIf { it.id == scan.id }
+    val active = current != null
+    val playing = active && player.playing
+    val queued = player.queue.withIndex().any { (i, it) -> it.id == scan.id && i > player.index }
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        modifier = Modifier.fillMaxWidth().animateContentSize().clickable(onClickLabel = if (expanded) "Collapse" else "Expand") { expanded = !expanded },
+    ) {
+        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Place, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    scan.placeLabel(),
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(scan.timeLabel(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FavoriteButton(scan) { viewModel.toggleFavorite(scan) }
+                Box {
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More actions") }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Play next") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null) },
+                            onClick = { menu = false; viewModel.playNext(scan) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add to queue") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) },
+                            onClick = { menu = false; viewModel.addToQueue(scan) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Fix text") },
+                            leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                            onClick = { menu = false; editing = true },
+                        )
+                        if (Translator.needsTranslation(scan.languageTag)) {
+                            DropdownMenuItem(
+                                text = { Text(if (scan.translation != null) "Translate again" else "Translate") },
+                                leadingIcon = { Icon(Icons.Filled.Translate, null) },
+                                enabled = !translating,
+                                onClick = { menu = false; viewModel.translate(scan) },
+                            )
+                        }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(end = 8.dp)) {
+                Thumbnail(scan.thumbnail, Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)))
+                HighlightedText(
+                    scan.text,
+                    if (current?.translated == false) player.highlight else null,
+                    MaterialTheme.typography.bodyLarge,
+                    Modifier.weight(1f),
+                    maxLines = if (expanded) Int.MAX_VALUE else 4,
+                )
+            }
+            if (scan.translation != null) {
+                Column(Modifier.padding(end = 8.dp)) {
+                    Text("Translation", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    HighlightedText(
+                        scan.translation,
+                        if (current?.translated == true) player.highlight else null,
+                        MaterialTheme.typography.bodyMedium,
+                        maxLines = if (expanded) Int.MAX_VALUE else 3,
+                    )
+                    TextButton(onClick = { viewModel.playNow(scan, translated = true) }) { Text("Listen to translation") }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 8.dp)) {
+                Text(
+                    listOfNotNull(scan.languageLabel(), if (queued) "In queue" else null, if (translating) "Translating…" else null).joinToString(" · "),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                FilledTonalButton(onClick = { if (active) viewModel.togglePlayback() else viewModel.playNow(scan) }) {
+                    Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text(if (playing) "Pause" else if (active) "Resume" else "Listen")
+                    if (playing) {
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Icon(Icons.Filled.GraphicEq, null, Modifier.size(ButtonDefaults.IconSize))
+                    }
+                }
+            }
+        }
+    }
+    if (editing) EditTextDialog(scan.text, onDismiss = { editing = false }) { viewModel.editText(scan, it) }
+}
+
+@Composable
+private fun EmptyState(modifier: Modifier = Modifier) {
+    Column(
+        modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(Icons.AutoMirrored.Outlined.Notes, null, Modifier.size(72.dp), tint = MaterialTheme.colorScheme.outline)
+        Spacer(Modifier.size(16.dp))
+        Text("Nothing scanned yet", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "Point the camera at a plaque or label and it will show up here.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
