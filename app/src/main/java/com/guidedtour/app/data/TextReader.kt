@@ -233,11 +233,18 @@ class TextReader private constructor(context: Context) {
             .sortedWith(compareByDescending<Voice> { it.quality }.thenBy { it.isNetworkConnectionRequired }.thenBy { it.name })
     }.getOrDefault(emptyList())
 
+    /** Default voice per language, as its position in the settings picker ("Voice 5" = 5). */
+    private val preferredVoiceNumber = mapOf("en" to 5)
+
     /**
      * The voice used when the user hasn't picked one: the best-quality installed voice, preferring the
      * phone's own region (US vs UK English) and skipping online-only voices while offline.
      */
     private fun bestVoice(locale: Locale): Voice? {
+        preferredVoiceNumber[locale.language]
+            ?.let { sortedVoices(locale.language).getOrNull(it - 1) }
+            ?.takeIf { !it.isNetworkConnectionRequired || isOnline() }
+            ?.let { return it }
         val usable = sortedVoices(locale.language).filter { !it.isNetworkConnectionRequired || isOnline() }
         val region = locale.country.ifBlank { Locale.getDefault().country }
         return usable.firstOrNull { it.locale.country == region } ?: usable.firstOrNull()
