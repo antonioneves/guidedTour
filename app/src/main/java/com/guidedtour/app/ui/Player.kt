@@ -218,6 +218,7 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
     val pitch by settings.pitch.collectAsStateWithLifecycle()
     val queueNew by settings.queueNewScans.collectAsStateWithLifecycle()
     val volumeShutter by settings.volumeShutter.collectAsStateWithLifecycle()
+    val duckMusic by settings.duckMusic.collectAsStateWithLifecycle()
     val script by settings.script.collectAsStateWithLifecycle()
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -239,6 +240,11 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
                 "Queue new scans",
                 "Keep reading the current text and add new scans to the end of the queue.",
                 queueNew, settings::setQueueNewScans,
+            )
+            SwitchRow(
+                "Only lower other audio",
+                "Off: music and other apps pause while reading. On: they keep playing more quietly.",
+                duckMusic, settings::setDuckMusic,
             )
             SwitchRow(
                 "Volume buttons take the photo",

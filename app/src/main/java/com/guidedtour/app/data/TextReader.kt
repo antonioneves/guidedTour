@@ -54,10 +54,7 @@ class TextReader private constructor(context: Context) {
         .setUsage(AudioAttributes.USAGE_MEDIA)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
-    private val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-        .setAudioAttributes(speechAttributes)
-        .setOnAudioFocusChangeListener({ change -> onFocusChange(change) }, main)
-        .build()
+    private var focusRequest: AudioFocusRequest? = null
 
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state
@@ -305,8 +302,23 @@ class TextReader private constructor(context: Context) {
 
     // ---- Audio focus: duck music while reading, pause for calls and other speech ----
 
-    private fun requestFocus() { audio.requestAudioFocus(focusRequest) }
-    private fun abandonFocus() { audio.abandonAudioFocusRequest(focusRequest) }
+    /** Takes audio focus: other apps pause (or just lower their volume if the user chose that) and resume afterwards. */
+    private fun requestFocus() {
+        if (focusRequest != null) return
+        val gain = if (settings.duckMusic.value) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+        else AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+        val request = AudioFocusRequest.Builder(gain)
+            .setAudioAttributes(speechAttributes)
+            .setOnAudioFocusChangeListener({ change -> onFocusChange(change) }, main)
+            .build()
+        audio.requestAudioFocus(request)
+        focusRequest = request
+    }
+
+    private fun abandonFocus() {
+        focusRequest?.let { audio.abandonAudioFocusRequest(it) }
+        focusRequest = null
+    }
 
     private fun onFocusChange(change: Int) {
         when (change) {

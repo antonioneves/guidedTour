@@ -26,6 +26,9 @@ class Settings private constructor(context: Context) {
     val pitch: StateFlow<Float> = _pitch
     private val _queueNewScans = MutableStateFlow(prefs.getBoolean("queueNewScans", true))
     val queueNewScans: StateFlow<Boolean> = _queueNewScans
+    private val _duckMusic = MutableStateFlow(prefs.getBoolean("duckMusic", false))
+    /** False (default): other apps' audio is paused while reading. True: it is only turned down. */
+    val duckMusic: StateFlow<Boolean> = _duckMusic
     private val _volumeShutter = MutableStateFlow(prefs.getBoolean("volumeShutter", false))
     val volumeShutter: StateFlow<Boolean> = _volumeShutter
     private val _script = MutableStateFlow(
@@ -48,6 +51,7 @@ class Settings private constructor(context: Context) {
     fun setRate(value: Float) { _rate.value = value; prefs.edit().putFloat("rate", value).apply() }
     fun setPitch(value: Float) { _pitch.value = value; prefs.edit().putFloat("pitch", value).apply() }
     fun setQueueNewScans(value: Boolean) { _queueNewScans.value = value; prefs.edit().putBoolean("queueNewScans", value).apply() }
+    fun setDuckMusic(value: Boolean) { _duckMusic.value = value; prefs.edit().putBoolean("duckMusic", value).apply() }
     fun setVolumeShutter(value: Boolean) { _volumeShutter.value = value; prefs.edit().putBoolean("volumeShutter", value).apply() }
     fun setScript(value: OcrScript) { _script.value = value; prefs.edit().putString("script", value.name).apply() }
 }
