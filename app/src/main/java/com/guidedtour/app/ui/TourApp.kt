@@ -2,9 +2,12 @@ package com.guidedtour.app.ui
 
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.annotation.DrawableRes
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,17 +27,22 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.guidedtour.app.R
 import com.guidedtour.app.ScanState
 import com.guidedtour.app.TourViewModel
+import kotlinx.coroutines.launch
 
 private enum class Tab(val label: String, val icon: ImageVector?, val selectedIcon: ImageVector?, @DrawableRes val iconRes: Int? = null) {
     Scan("Scan", Icons.Outlined.CameraAlt, Icons.Filled.CameraAlt),
@@ -64,17 +72,29 @@ fun TourApp(viewModel: TourViewModel) {
     val snackbar = remember { SnackbarHostState() }
 
     LaunchedEffect(selected) { viewModel.scanTabVisible.value = selected == Tab.Scan }
-    // Show each new scan in Guides as soon as it's read; go back to the camera if no text was found.
+    // Show each new scan in Guides as soon as it's read (from the camera, after its photo has dropped
+    // into the tab); go back to the camera if no text was found.
     val scanState by viewModel.state.collectAsStateWithLifecycle()
+    val guidesBounce = remember { Animatable(1f) }
+    val flight = remember { CaptureFlight() }
+    val scope = rememberCoroutineScope()
+    fun openGuides(bounce: Boolean) {
+        selected = Tab.Guides
+        if (bounce) scope.launch {
+            guidesBounce.snapTo(1.35f)
+            guidesBounce.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium))
+        }
+    }
     LaunchedEffect(scanState) {
         when (scanState) {
-            is ScanState.Done -> selected = Tab.Guides
+            is ScanState.Done -> if (selected != Tab.Scan) openGuides(bounce = false)
             ScanState.NoText -> selected = Tab.Scan
             else -> Unit
         }
     }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
 
+    Box(Modifier.fillMaxSize()) {
     NavigationSuiteScaffold(
         navigationSuiteItems = {
             Tab.entries.forEach { tab ->
@@ -83,8 +103,11 @@ fun TourApp(viewModel: TourViewModel) {
                     onClick = { selected = tab },
                     icon = {
                         val vector = if (selected == tab) tab.selectedIcon else tab.icon
-                        if (vector != null) Icon(vector, contentDescription = null)
-                        else Icon(painterResource(tab.iconRes!!), contentDescription = null)
+                        val bounce = if (tab == Tab.Guides) {
+                            Modifier.scale(guidesBounce.value).onGloballyPositioned { flight.target = it.boundsInRoot().center }
+                        } else Modifier
+                        if (vector != null) Icon(vector, contentDescription = null, modifier = bounce)
+                        else Icon(painterResource(tab.iconRes!!), contentDescription = null, modifier = bounce)
                     },
                     label = { Text(tab.label) },
                 )
@@ -97,7 +120,7 @@ fun TourApp(viewModel: TourViewModel) {
                 // It sits underneath; the other tabs are opaque and cover it.
                 val onScan = selected == Tab.Scan
                 Box(Modifier.fillMaxSize().then(if (onScan) Modifier else Modifier.clearAndSetSemantics {})) {
-                    CameraScreen(viewModel, visible = onScan, onOpenSettings = { showSettings = true })
+                    CameraScreen(viewModel, visible = onScan, flight = flight, onOpenSettings = { showSettings = true }, onDropped = { openGuides(bounce = true) })
                 }
                 when (selected) {
                     Tab.Scan -> Unit
@@ -110,6 +133,8 @@ fun TourApp(viewModel: TourViewModel) {
                 NowPlayingBar(player, viewModel, onOpenQueue = { showQueue = true })
             }
         }
+    }
+    CaptureFlightOverlay(flight)
     }
 
     if (showQueue) QueueSheet(viewModel, onDismiss = { showQueue = false })

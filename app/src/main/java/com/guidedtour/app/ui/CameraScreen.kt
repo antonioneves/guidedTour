@@ -76,6 +76,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -85,6 +86,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -116,6 +119,8 @@ private const val IDLE_RELEASE_MS = 20_000L
 private const val CAREFUL_PHOTOS = 3
 private const val FLASH_MS = 250
 private const val SHRINK_MS = 450
+private const val CARD_SCALE = 0.6f
+private const val CARD_LIFT = 0.04f
 
 /** Takes one photo; null if the camera failed. The caller owns (and must close) the image. */
 /** Takes one photo. [onStarted] runs at the moment of capture, before the photo is processed. */
@@ -221,7 +226,7 @@ private fun hasCameraPermission(context: android.content.Context) =
     ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
 @Composable
-fun CameraScreen(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () -> Unit) {
+fun CameraScreen(viewModel: TourViewModel, visible: Boolean, flight: CaptureFlight, onOpenSettings: () -> Unit, onDropped: () -> Unit) {
     val context = LocalContext.current
     var hasCamera by remember { mutableStateOf(hasCameraPermission(context)) }
     // Re-check on resume so granting the permission dialog takes effect immediately.
@@ -229,7 +234,7 @@ fun CameraScreen(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () 
         hasCamera = hasCameraPermission(context)
         onPauseOrDispose {}
     }
-    if (hasCamera) CameraContent(viewModel, visible, onOpenSettings) else CameraPermissionNeeded()
+    if (hasCamera) CameraContent(viewModel, visible, flight, onOpenSettings, onDropped) else CameraPermissionNeeded()
 }
 
 @Composable
@@ -260,7 +265,7 @@ private fun CameraPermissionNeeded() {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () -> Unit) {
+private fun CameraContent(viewModel: TourViewModel, visible: Boolean, flight: CaptureFlight, onOpenSettings: () -> Unit, onDropped: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -282,6 +287,8 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
     var snapshot by remember { mutableStateOf<ImageBitmap?>(null) }
     var photosTaken by remember { mutableStateOf(false) }
     val shrink = remember { Animatable(0f) }
+    val drop = remember { Animatable(0f) }
+    var bounds by remember { mutableStateOf(Rect.Zero) }
     val snackbar = remember { SnackbarHostState() }
 
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -377,10 +384,25 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
     }
     LaunchedEffect(Unit) { viewModel.shutter.collect { capture() } }
     LaunchedEffect(state) {
+        // Text found: the photo card drops into the Guides tab, which then opens.
+        val photo = snapshot
+        if (state is ScanState.Done && visible && photo != null) {
+            if (shrink.value < 1f) shrink.animateTo(1f, tween(SHRINK_MS / 2))
+            // Hand the card over to the app-wide overlay, which flies it into the Guides tab.
+            val centre = Offset(bounds.center.x, bounds.center.y - bounds.height * CARD_LIFT)
+            val half = Offset(bounds.width, bounds.height) * (CARD_SCALE / 2)
+            val card = Rect(centre - half, centre + half)
+            drop.snapTo(1f)
+            flight.fly(photo, card)
+            onDropped()
+        } else if (state is ScanState.Done) {
+            onDropped()
+        }
         if (state !is ScanState.Processing) {
             snapshot = null
             photosTaken = false
             shrink.snapTo(0f)
+            drop.snapTo(0f)
         }
         if (state is ScanState.NoText) {
             snackbar.showSnackbar("No text found in the photo. Try again.")
@@ -388,7 +410,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
         }
     }
 
-    Box(Modifier.fillMaxSize().onSizeChanged { viewSize = it }) {
+    Box(Modifier.fillMaxSize().onSizeChanged { viewSize = it }.onGloballyPositioned { bounds = it.boundsInRoot() }) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -446,10 +468,12 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
         ) { Icon(Icons.Filled.Settings, "Settings") }
 
         val processing = state == ScanState.Processing
-        if (processing) {
+        if (processing || (state is ScanState.Done && snapshot != null)) {
             CaptureOverlay(
                 snapshot = snapshot.takeIf { photosTaken },
                 progress = shrink.value,
+                handedOver = drop.value > 0f,
+                scrim = 1f - flight.progress.value,
                 message = if (photosTaken) "Reading the text…" else "Hold still…",
             )
         }
@@ -471,11 +495,13 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
 /**
  * Shown while a capture is processed: [message] above the shutter and, once the photos are taken,
  * the photographed frame shrinking into a card in the middle of a dimmed screen ([progress] 0 to 1).
+ * Once [handedOver], the card is flying into the Guides tab (see [CaptureFlight]) and only the
+ * dimmed background remains, fading out.
  */
 @Composable
-private fun CaptureOverlay(snapshot: ImageBitmap?, progress: Float, message: String) {
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f * progress))) {
-        if (snapshot != null) {
+private fun CaptureOverlay(snapshot: ImageBitmap?, progress: Float, handedOver: Boolean, scrim: Float, message: String) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f * progress * scrim))) {
+        if (snapshot != null && !handedOver) {
             val corner = (28 * progress).dp
             Image(
                 snapshot,
@@ -484,23 +510,25 @@ private fun CaptureOverlay(snapshot: ImageBitmap?, progress: Float, message: Str
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        val scale = 1f - 0.4f * progress
+                        val scale = 1f - (1f - CARD_SCALE) * progress
                         scaleX = scale
                         scaleY = scale
-                        translationY = -size.height * 0.04f * progress
+                        translationY = -size.height * CARD_LIFT * progress
                         shape = RoundedCornerShape(corner)
                         clip = true
                         shadowElevation = 24.dp.toPx() * progress
                     },
             )
         }
-        Surface(
-            shape = CircleShape,
-            color = Color.Black.copy(alpha = 0.6f),
-            contentColor = Color.White,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp).semantics { liveRegion = LiveRegionMode.Polite },
-        ) {
-            Text(message, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+        if (!handedOver) {
+            Surface(
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.6f),
+                contentColor = Color.White,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            ) {
+                Text(message, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+            }
         }
     }
 }
