@@ -3,6 +3,7 @@ package com.guidedtour.app.ui
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.foundation.Image
+import com.guidedtour.app.BuildConfig
 import com.guidedtour.app.data.Translator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.lazy.items
@@ -355,16 +356,19 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
                 careful, settings::setCarefulCapture,
             )
 
-            Text("Developer", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
-            Text(
-                "Measure reading accuracy on your own photos. Put name.jpg and name.txt (the true text) pairs in:\n" +
-                    viewModel.accuracyFolder,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            androidx.compose.material3.OutlinedButton(onClick = viewModel::runAccuracyTest) { Text("Run accuracy test") }
-            report?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace))
+            // Developer tools only appear in debug builds.
+            if (BuildConfig.DEBUG) {
+                Text("Developer", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+                Text(
+                    "Measure reading accuracy on your own photos. Put name.jpg and name.txt (the true text) pairs in:\n" +
+                        viewModel.accuracyFolder,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                androidx.compose.material3.OutlinedButton(onClick = viewModel::runAccuracyTest) { Text("Run accuracy test") }
+                report?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace))
+                }
             }
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Done") }
         }
