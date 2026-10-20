@@ -353,21 +353,20 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, flight: Ca
         armed = false
         val liveText = frame.text
         val photos = if (careful) CAREFUL_PHOTOS else 1
+        // The frame on screen at the tap shrinks into a card straight away, while the photos are
+        // taken in the background; "Hold still…" stays up until the last one is in.
+        photosTaken = false
+        snapshot = previewView?.bitmap?.asImageBitmap()
+        scope.launch { flash.snapTo(0.85f); flash.animateTo(0f, tween(FLASH_MS)) }
+        scope.launch { shrink.snapTo(0f); shrink.animateTo(1f, tween(SHRINK_MS, easing = FastOutSlowInEasing)) }
         scope.launch {
-            photosTaken = false
             // Take a few photos in a row; the view model keeps the sharpest and reads it.
-            repeat(photos) { i ->
-                // A camera-style flash on the first photo shows the capture happened.
-                if (i == 0) launch { flash.snapTo(0.85f); flash.animateTo(0f, tween(FLASH_MS)) }
-                val image = takePhoto(controller, ContextCompat.getMainExecutor(context), onStarted = {
-                    if (i == 0) snapshot = previewView?.bitmap?.asImageBitmap()
-                })
+            repeat(photos) {
+                val image = takePhoto(controller, ContextCompat.getMainExecutor(context))
                 if (image != null) viewModel.addFrame(image)
             }
             viewModel.finishCapture(liveText)
-            // Only now, with every photo taken, may the phone move: shrink the frozen frame.
             photosTaken = true
-            shrink.animateTo(1f, tween(SHRINK_MS, easing = FastOutSlowInEasing))
         }
     }
 
@@ -470,7 +469,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, flight: Ca
         val processing = state == ScanState.Processing
         if (processing || (state is ScanState.Done && snapshot != null)) {
             CaptureOverlay(
-                snapshot = snapshot.takeIf { photosTaken },
+                snapshot = snapshot,
                 progress = shrink.value,
                 handedOver = drop.value > 0f,
                 scrim = 1f - flight.progress.value,
