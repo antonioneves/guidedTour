@@ -97,7 +97,7 @@ fun TourApp(viewModel: TourViewModel) {
                 // It sits underneath; the other tabs are opaque and cover it.
                 val onScan = selected == Tab.Scan
                 Box(Modifier.fillMaxSize().then(if (onScan) Modifier else Modifier.clearAndSetSemantics {})) {
-                    CameraScreen(viewModel, visible = onScan, onOpenSettings = { showSettings = true }, onCaptured = { selected = Tab.Guides })
+                    CameraScreen(viewModel, visible = onScan, onOpenSettings = { showSettings = true })
                 }
                 when (selected) {
                     Tab.Scan -> Unit

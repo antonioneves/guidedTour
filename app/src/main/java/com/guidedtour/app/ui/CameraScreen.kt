@@ -1,22 +1,16 @@
 package com.guidedtour.app.ui
 
 import android.Manifest
-import kotlin.math.sqrt
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.State
-import android.hardware.SensorManager
-import android.hardware.SensorEventListener
-import android.hardware.SensorEvent
-import android.hardware.Sensor
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Matrix
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.net.Uri
-import android.provider.Settings
 import android.os.SystemClock
-import androidx.camera.core.ExperimentalZeroShutterLag
+import android.provider.Settings
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -26,9 +20,11 @@ import androidx.camera.view.CameraController
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,6 +36,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.CameraAlt
@@ -68,20 +65,26 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -100,16 +103,19 @@ import com.guidedtour.app.ScanState
 import com.guidedtour.app.TourViewModel
 import com.guidedtour.app.data.Recognizer
 import com.guidedtour.app.data.cleanOcr
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.sqrt
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 private const val AUTO_CAPTURE_MS = 2500L
 private const val IDLE_RELEASE_MS = 20_000L
 private const val CAREFUL_PHOTOS = 3
 private const val FLASH_MS = 250
-private const val SWITCH_AFTER_MS = 300L
+private const val SHRINK_MS = 450
 
 /** Takes one photo; null if the camera failed. The caller owns (and must close) the image. */
 /** Takes one photo. [onStarted] runs at the moment of capture, before the photo is processed. */
@@ -215,7 +221,7 @@ private fun hasCameraPermission(context: android.content.Context) =
     ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
 @Composable
-fun CameraScreen(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () -> Unit, onCaptured: () -> Unit) {
+fun CameraScreen(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
     var hasCamera by remember { mutableStateOf(hasCameraPermission(context)) }
     // Re-check on resume so granting the permission dialog takes effect immediately.
@@ -223,7 +229,7 @@ fun CameraScreen(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () 
         hasCamera = hasCameraPermission(context)
         onPauseOrDispose {}
     }
-    if (hasCamera) CameraContent(viewModel, visible, onOpenSettings, onCaptured) else CameraPermissionNeeded()
+    if (hasCamera) CameraContent(viewModel, visible, onOpenSettings) else CameraPermissionNeeded()
 }
 
 @Composable
@@ -252,9 +258,9 @@ private fun CameraPermissionNeeded() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalZeroShutterLag::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () -> Unit, onCaptured: () -> Unit) {
+private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -271,6 +277,11 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
     var armed by remember { mutableStateOf(true) }
     val countdown = remember { Animatable(0f) }
     val flash = remember { Animatable(0f) }
+    // While the photo is read, the frame that was photographed shrinks to the middle of the screen.
+    var previewView by remember { mutableStateOf<PreviewView?>(null) }
+    var snapshot by remember { mutableStateOf<ImageBitmap?>(null) }
+    var photosTaken by remember { mutableStateOf(false) }
+    val shrink = remember { Animatable(0f) }
     val snackbar = remember { SnackbarHostState() }
 
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -287,10 +298,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
     val controller = remember {
         LifecycleCameraController(context).apply {
             setEnabledUseCases(CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE)
-            // Zero shutter lag keeps the frame from the moment of the tap, so the app can move to
-            // Guides at once without the photo blurring as the phone is lowered. Phones without it
-            // fall back to the normal mode.
-            imageCaptureMode = ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG
+            imageCaptureMode = ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY
             isTapToFocusEnabled = true
             isPinchToZoomEnabled = true
         }
@@ -339,19 +347,20 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
         val liveText = frame.text
         val photos = if (careful) CAREFUL_PHOTOS else 1
         scope.launch {
-            var switched = false
-            fun showGuides() { if (!switched) { switched = true; onCaptured() } }
-            // Go to Guides (with its "Reading the text…" card) once the first photo is taken, or
-            // shortly after the tap if the camera is slow to start.
-            launch { delay(SWITCH_AFTER_MS); showGuides() }
+            photosTaken = false
             // Take a few photos in a row; the view model keeps the sharpest and reads it.
             repeat(photos) { i ->
                 // A camera-style flash on the first photo shows the capture happened.
                 if (i == 0) launch { flash.snapTo(0.85f); flash.animateTo(0f, tween(FLASH_MS)) }
-                val image = takePhoto(controller, ContextCompat.getMainExecutor(context), onStarted = ::showGuides)
+                val image = takePhoto(controller, ContextCompat.getMainExecutor(context), onStarted = {
+                    if (i == 0) snapshot = previewView?.bitmap?.asImageBitmap()
+                })
                 if (image != null) viewModel.addFrame(image)
             }
             viewModel.finishCapture(liveText)
+            // Only now, with every photo taken, may the phone move: shrink the frozen frame.
+            photosTaken = true
+            shrink.animateTo(1f, tween(SHRINK_MS, easing = FastOutSlowInEasing))
         }
     }
 
@@ -368,6 +377,11 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
     }
     LaunchedEffect(Unit) { viewModel.shutter.collect { capture() } }
     LaunchedEffect(state) {
+        if (state !is ScanState.Processing) {
+            snapshot = null
+            photosTaken = false
+            shrink.snapTo(0f)
+        }
         if (state is ScanState.NoText) {
             snackbar.showSnackbar("No text found in the photo. Try again.")
             viewModel.dismissResult()
@@ -379,6 +393,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 PreviewView(ctx).also {
+                    previewView = it
                     it.controller = controller
                     controller.bindToLifecycle(lifecycleOwner)
                 }
@@ -430,6 +445,14 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
             colors = IconButtonDefaults.iconButtonColors(containerColor = Color.Black.copy(alpha = 0.45f), contentColor = Color.White),
         ) { Icon(Icons.Filled.Settings, "Settings") }
 
+        val processing = state == ScanState.Processing
+        if (processing) {
+            CaptureOverlay(
+                snapshot = snapshot.takeIf { photosTaken },
+                progress = shrink.value,
+                message = if (photosTaken) "Reading the text…" else "Hold still…",
+            )
+        }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp))
         if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
 
@@ -441,6 +464,43 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
             } else {
                 Shutter(progress = countdown.value, onClick = ::capture)
             }
+        }
+    }
+}
+
+/**
+ * Shown while a capture is processed: [message] above the shutter and, once the photos are taken,
+ * the photographed frame shrinking into a card in the middle of a dimmed screen ([progress] 0 to 1).
+ */
+@Composable
+private fun CaptureOverlay(snapshot: ImageBitmap?, progress: Float, message: String) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f * progress))) {
+        if (snapshot != null) {
+            val corner = (28 * progress).dp
+            Image(
+                snapshot,
+                contentDescription = null,
+                contentScale = ContentScale.FillBounds,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val scale = 1f - 0.4f * progress
+                        scaleX = scale
+                        scaleY = scale
+                        translationY = -size.height * 0.04f * progress
+                        shape = RoundedCornerShape(corner)
+                        clip = true
+                        shadowElevation = 24.dp.toPx() * progress
+                    },
+            )
+        }
+        Surface(
+            shape = CircleShape,
+            color = Color.Black.copy(alpha = 0.6f),
+            contentColor = Color.White,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp).semantics { liveRegion = LiveRegionMode.Polite },
+        ) {
+            Text(message, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
         }
     }
 }
