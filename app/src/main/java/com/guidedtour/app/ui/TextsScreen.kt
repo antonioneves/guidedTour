@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -25,10 +26,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.outlined.Notes
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -58,22 +61,26 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SplitButtonDefaults
+import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -99,6 +106,8 @@ fun TextsScreen(viewModel: TourViewModel, onOpenSettings: () -> Unit) {
     val scans by viewModel.scans.collectAsStateWithLifecycle()
     val player by viewModel.player.collectAsStateWithLifecycle()
     val translating by viewModel.translating.collectAsStateWithLifecycle()
+    val translateTo by viewModel.settings.translateTo.collectAsStateWithLifecycle()
+    val target = Translator.target(translateTo)
     val scanState by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var highlightId by remember { mutableStateOf<Long?>(null) }
@@ -204,7 +213,7 @@ fun TextsScreen(viewModel: TourViewModel, onOpenSettings: () -> Unit) {
                     item(key = "visit-${visit.id}") { VisitHeader(visit, onPlay = { viewModel.playAll(visit.chronological) }) }
                     items(visit.scans, key = { it.id }) { scan ->
                         ScanCard(
-                            scan, player, scan.id in translating, viewModel,
+                            scan, player, scan.id in translating, target, viewModel,
                             highlighted = scan.id == highlightId,
                             onDelete = { delete(scan) },
                             modifier = Modifier.animateItem(),
@@ -244,6 +253,7 @@ private fun ScanCard(
     scan: Scan,
     player: PlayerState,
     translating: Boolean,
+    target: String,
     viewModel: TourViewModel,
     highlighted: Boolean,
     onDelete: () -> Unit,
@@ -319,9 +329,9 @@ private fun ScanCard(
                                 onClick = { menu = false; confirmCloud = true },
                             )
                         }
-                        if (Translator.needsTranslation(scan.languageTag)) {
+                        if (Translator.needsTranslation(scan.languageTag, target)) {
                             DropdownMenuItem(
-                                text = { Text(if (scan.translation != null) "Translate again" else "Translate") },
+                                text = { Text(if (scan.translationTag == target) "Translate again" else "Translate into ${Translator.nameOf(target)}") },
                                 leadingIcon = { Icon(Icons.Filled.Translate, null) },
                                 enabled = !translating,
                                 onClick = { menu = false; viewModel.translate(scan) },
@@ -352,14 +362,17 @@ private fun ScanCard(
             }
             if (scan.translation != null) {
                 Column(Modifier.padding(end = 8.dp)) {
-                    Text("Translation", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        "Translation" + (scan.translationTag?.let { " · ${Translator.nameOf(it)}" } ?: ""),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                     HighlightedText(
                         scan.translation,
                         if (current?.translated == true) player.highlight else null,
                         MaterialTheme.typography.bodyMedium,
                         maxLines = if (expanded) Int.MAX_VALUE else 3,
                     )
-                    TextButton(onClick = { viewModel.playNow(scan, translated = true) }) { Text("Listen to translation") }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 8.dp)) {
@@ -369,15 +382,7 @@ private fun ScanCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.weight(1f))
-                FilledTonalButton(onClick = { if (active) viewModel.togglePlayback() else viewModel.playNow(scan) }) {
-                    Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(ButtonDefaults.IconSize))
-                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                    Text(if (playing) "Pause" else if (active) "Resume" else "Listen")
-                    if (playing) {
-                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                        Icon(Icons.Filled.GraphicEq, null, Modifier.size(ButtonDefaults.IconSize))
-                    }
-                }
+                ListenButton(scan, player, translating, target, viewModel)
             }
         }
     }
@@ -440,3 +445,86 @@ private fun ReadingCard(modifier: Modifier = Modifier) {
         }
     }
 }
+
+/**
+ * Plays or pauses the scan. When it has (or can have) a translation, it is a split button: the
+ * arrow picks the original, the translation, or translating into [target]; picking one plays it.
+ * With a translation it plays the translation by default.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun ListenButton(scan: Scan, player: PlayerState, translating: Boolean, target: String, viewModel: TourViewModel) {
+    val current = player.current?.takeIf { it.id == scan.id }
+    val playing = current != null && player.playing
+    val translatable = Translator.needsTranslation(scan.languageTag, target)
+    val hasTranslation = scan.translation != null
+    var useTranslation by rememberSaveable(scan.id) { mutableStateOf(hasTranslation) }
+    LaunchedEffect(scan.translation) { if (scan.translation != null) useTranslation = true }
+    var menu by remember { mutableStateOf(false) }
+
+    fun play(translated: Boolean) {
+        useTranslation = translated
+        if (current != null && current.translated == translated) viewModel.togglePlayback() else viewModel.playNow(scan, translated)
+    }
+    val label = when {
+        playing -> "Pause"
+        current != null -> "Resume"
+        !hasTranslation && !translatable -> "Listen"
+        useTranslation && hasTranslation -> "Listen · ${scan.translationTag?.let(Translator::nameOf) ?: "translation"}"
+        else -> "Listen · ${scan.languageLabel() ?: "original"}"
+    }
+    val content: @Composable RowScope.() -> Unit = {
+        Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(ButtonDefaults.IconSize))
+        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+        Text(label)
+        if (playing) {
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Icon(Icons.Filled.GraphicEq, null, Modifier.size(ButtonDefaults.IconSize))
+        }
+    }
+    if (!hasTranslation && !translatable) {
+        FilledTonalButton(onClick = { play(false) }, content = content)
+        return
+    }
+    Box {
+        SplitButtonLayout(
+            leadingButton = {
+                SplitButtonDefaults.TonalLeadingButton(onClick = {
+                    if (current != null) viewModel.togglePlayback() else play(useTranslation && hasTranslation)
+                }, content = content)
+            },
+            trailingButton = {
+                SplitButtonDefaults.TonalTrailingButton(
+                    checked = menu,
+                    onCheckedChange = { menu = it },
+                    modifier = Modifier.semantics { contentDescription = "Choose original or translation" },
+                ) {
+                    Icon(Icons.Filled.KeyboardArrowDown, null, Modifier.size(SplitButtonDefaults.TrailingIconSize))
+                }
+            },
+        )
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(
+                text = { Text("Original" + (scan.languageLabel()?.let { " · $it" } ?: "")) },
+                leadingIcon = { if (!useTranslation || !hasTranslation) Icon(Icons.Filled.Check, null) },
+                onClick = { menu = false; play(false) },
+            )
+            if (hasTranslation) {
+                DropdownMenuItem(
+                    text = { Text("Translation" + (scan.translationTag?.let { " · ${Translator.nameOf(it)}" } ?: "")) },
+                    leadingIcon = { if (useTranslation) Icon(Icons.Filled.Check, null) },
+                    onClick = { menu = false; play(true) },
+                )
+            }
+            if (translatable && scan.translationTag != target) {
+                DropdownMenuItem(
+                    text = { Text(if (translating) "Translating…" else "Translate into ${Translator.nameOf(target)}") },
+                    leadingIcon = { Icon(Icons.Filled.Translate, null) },
+                    enabled = !translating,
+                    onClick = { menu = false; useTranslation = true; viewModel.translate(scan) },
+                )
+            }
+        }
+    }
+}
+

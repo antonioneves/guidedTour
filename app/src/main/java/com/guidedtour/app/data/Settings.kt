@@ -39,6 +39,10 @@ class Settings private constructor(context: Context) {
     )
     val script: StateFlow<OcrScript> = _script
 
+    private val _translateTo = MutableStateFlow(prefs.getString("translateTo", "").orEmpty())
+    /** Language code to translate into; empty (the default) means the phone's language. */
+    val translateTo: StateFlow<String> = _translateTo
+
     /** Chosen TextToSpeech voice name per language code (e.g. "es"); no entry means the default voice. */
     private val _voices = MutableStateFlow(
         prefs.all.filterKeys { it.startsWith("voice.") }.entries
@@ -57,5 +61,6 @@ class Settings private constructor(context: Context) {
     fun setDuckMusic(value: Boolean) { _duckMusic.value = value; prefs.edit().putBoolean("duckMusic", value).apply() }
     fun setCarefulCapture(value: Boolean) { _carefulCapture.value = value; prefs.edit().putBoolean("carefulCapture", value).apply() }
     fun setVolumeShutter(value: Boolean) { _volumeShutter.value = value; prefs.edit().putBoolean("volumeShutter", value).apply() }
+    fun setTranslateTo(code: String) { _translateTo.value = code; prefs.edit().putString("translateTo", code).apply() }
     fun setScript(value: OcrScript) { _script.value = value; prefs.edit().putString("script", value.name).apply() }
 }

@@ -15,6 +15,16 @@ object Translator {
         data class Failure(val message: String) : Result
     }
 
+    /** The language to translate into: the chosen [setting], or the phone's language when it is empty. */
+    fun target(setting: String): String = setting.ifEmpty { Locale.getDefault().language }
+
+    /** Every language ML Kit can translate into, as language codes sorted by their name. */
+    val languages: List<String> by lazy { TranslateLanguage.getAllLanguages().sortedBy(::nameOf) }
+
+    /** A language code's name in the phone's language, e.g. "en" -> "English". */
+    fun nameOf(code: String): String =
+        Locale.forLanguageTag(code).getDisplayLanguage(Locale.getDefault()).replaceFirstChar { it.titlecase(Locale.getDefault()) }
+
     /** True if [tag] is a language ML Kit can translate and differs from [target]. */
     fun needsTranslation(tag: String?, target: String = Locale.getDefault().language): Boolean {
         val source = tag?.let(::languageOf) ?: return false

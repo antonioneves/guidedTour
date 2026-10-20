@@ -28,7 +28,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.Locale
 
 sealed interface ScanState {
     data object Idle : ScanState
@@ -246,12 +245,12 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { _accuracyReport.value = Accuracy.run(app, settings.script.value) }
     }
 
-    /** Translates into the device language, stores the result and queues it for reading. */
+    /** Translates into the chosen language (the phone's by default), stores the result and queues it for reading. */
     fun translate(scan: Scan) {
         if (scan.id in _translating.value) return
         _translating.value += scan.id
         viewModelScope.launch {
-            val target = Locale.getDefault().language
+            val target = Translator.target(settings.translateTo.value)
             when (val result = Translator.translate(scan.text, scan.languageTag, target)) {
                 is Translator.Result.Success -> {
                     dao.setTranslation(scan.id, result.text, target)

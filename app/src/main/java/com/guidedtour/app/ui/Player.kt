@@ -3,6 +3,9 @@ package com.guidedtour.app.ui
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.foundation.Image
+import com.guidedtour.app.data.Translator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.window.DialogProperties
@@ -317,6 +320,8 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
 
             VoiceSection(viewModel)
 
+            TranslationSection(viewModel)
+
             SwitchRow(
                 "Queue new scans",
                 "Keep reading the current text and add new scans to the end of the queue.",
@@ -363,6 +368,59 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
             }
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Done") }
         }
+    }
+}
+
+/** Which language "Translate" uses: the phone's (the default) or one chosen from ML Kit's list. */
+@Composable
+private fun TranslationSection(viewModel: TourViewModel) {
+    val settings = viewModel.settings
+    val translateTo by settings.translateTo.collectAsStateWithLifecycle()
+    var choosing by remember { mutableStateOf(false) }
+    val phone = Translator.target("")
+    Row(
+        Modifier.fillMaxWidth().clickable(onClickLabel = "Choose language") { choosing = true },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Translate into", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (translateTo.isEmpty()) "Phone language (${Translator.nameOf(phone)})" else Translator.nameOf(translateTo),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = { choosing = true }) { Text("Change") }
+    }
+    if (choosing) {
+        AlertDialog(
+            onDismissRequest = { choosing = false },
+            title = { Text("Translate into") },
+            text = {
+                LazyColumn {
+                    item {
+                        LanguageRow("Phone language (${Translator.nameOf(phone)})", translateTo.isEmpty()) {
+                            settings.setTranslateTo(""); choosing = false
+                        }
+                    }
+                    items(Translator.languages) { code ->
+                        LanguageRow(Translator.nameOf(code), translateTo == code) { settings.setTranslateTo(code); choosing = false }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosing = false }) { Text("Close") } },
+        )
+    }
+}
+
+@Composable
+private fun LanguageRow(name: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().selectable(selected, role = Role.RadioButton, onClick = onClick).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected, null)
+        Text(name, Modifier.padding(start = 12.dp), style = MaterialTheme.typography.bodyLarge)
     }
 }
 
