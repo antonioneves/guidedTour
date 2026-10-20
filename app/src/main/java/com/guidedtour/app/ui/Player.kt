@@ -3,6 +3,7 @@ package com.guidedtour.app.ui
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.guidedtour.app.SEEK_SECONDS
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material.icons.filled.Replay10
@@ -202,16 +203,25 @@ private val thumbnailCache = object : LruCache<String, ImageBitmap>(24 * 1024 * 
 @Composable
 fun NowPlayingBar(player: PlayerState, viewModel: TourViewModel, onOpenQueue: () -> Unit, modifier: Modifier = Modifier) {
     val item = player.current ?: return
+    // A floating, rounded player in the inverse colours, so it stands apart from the cards.
+    val colors = MaterialTheme.colorScheme
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        tonalElevation = 3.dp,
+        modifier = modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = colors.inverseSurface,
+        contentColor = colors.inverseOnSurface,
+        shadowElevation = 6.dp,
     ) {
         Column(Modifier.clickable(onClickLabel = "Open reading queue", onClick = onOpenQueue)) {
             // How far through the text the reading is (from the word being spoken).
             val progress = player.highlight?.let { (it.last + 1).toFloat() / item.text.length.coerceAtLeast(1) } ?: 0f
-            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(3.dp), drawStopIndicator = {})
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 6.dp).height(3.dp),
+                color = colors.inversePrimary,
+                trackColor = colors.inverseOnSurface.copy(alpha = 0.2f),
+                drawStopIndicator = {},
+            )
             Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f).padding(top = 4.dp)) {
                     Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -232,7 +242,11 @@ fun NowPlayingBar(player: PlayerState, viewModel: TourViewModel, onOpenQueue: ()
             ) {
                 IconButton(onClick = viewModel::previous) { Icon(Icons.Filled.SkipPrevious, "Previous") }
                 IconButton(onClick = viewModel::seekBack) { Icon(Icons.Filled.Replay10, "Back $SEEK_SECONDS seconds") }
-                FilledIconButton(onClick = viewModel::togglePlayback, modifier = Modifier.size(56.dp)) {
+                FilledIconButton(
+                    onClick = viewModel::togglePlayback,
+                    modifier = Modifier.size(56.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = colors.inversePrimary, contentColor = colors.inverseSurface),
+                ) {
                     Icon(
                         if (player.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                         if (player.playing) "Pause" else "Play",

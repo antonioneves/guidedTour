@@ -27,7 +27,8 @@ import kotlinx.coroutines.launch
 
 /**
  * Foreground service that keeps reading with the screen off and exposes the queue through a media
- * session, so the lock screen, notification and Bluetooth headphones can pause, skip and stop.
+ * session, so the lock screen, notification and Bluetooth headphones can pause, skip, jump 10
+ * seconds back or forward, and stop.
  */
 class ReaderService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -49,6 +50,15 @@ class ReaderService : Service() {
                 override fun onSkipToNext() = reader.next()
                 override fun onSkipToPrevious() = reader.previous()
                 override fun onStop() = reader.stop()
+                // Headphone and car rewind / fast-forward buttons, and the lock-screen jump buttons.
+                override fun onRewind() = reader.seekBy(-SEEK_SECONDS)
+                override fun onFastForward() = reader.seekBy(SEEK_SECONDS)
+                override fun onCustomAction(action: String?, extras: android.os.Bundle?) {
+                    when (action) {
+                        ACTION_BACK -> reader.seekBy(-SEEK_SECONDS)
+                        ACTION_FORWARD -> reader.seekBy(SEEK_SECONDS)
+                    }
+                }
             })
             isActive = true
         }
@@ -60,6 +70,8 @@ class ReaderService : Service() {
             ACTION_NEXT -> reader.next()
             ACTION_PREVIOUS -> reader.previous()
             ACTION_STOP -> reader.stop()
+            ACTION_BACK -> reader.seekBy(-SEEK_SECONDS)
+            ACTION_FORWARD -> reader.seekBy(SEEK_SECONDS)
         }
         // ServiceCompat passes the service type only on Android 10+, where it exists.
         ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(reader.state.value), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
@@ -94,10 +106,14 @@ class ReaderService : Service() {
         )
         val actions = PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or
             PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or PlaybackStateCompat.ACTION_STOP
+            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or PlaybackStateCompat.ACTION_STOP or
+            PlaybackStateCompat.ACTION_REWIND or PlaybackStateCompat.ACTION_FAST_FORWARD
         session.setPlaybackState(
             PlaybackStateCompat.Builder()
                 .setActions(actions)
+                // Android 13+ builds the lock-screen controls from the session; these add the jumps.
+                .addCustomAction(ACTION_BACK, "Back $SEEK_SECONDS seconds", R.drawable.ic_replay_10)
+                .addCustomAction(ACTION_FORWARD, "Forward $SEEK_SECONDS seconds", R.drawable.ic_forward_10)
                 .setState(
                     if (state.playing) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
                     PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, if (state.playing) 1f else 0f,
@@ -122,15 +138,20 @@ class ReaderService : Service() {
             .setContentText(if (state.queue.size > 1) "${state.index + 1} of ${state.queue.size}" else "Reading aloud")
             .setContentIntent(open)
             .addAction(android.R.drawable.ic_media_previous, "Previous", action(ACTION_PREVIOUS, 1))
+            .addAction(R.drawable.ic_replay_10, "Back $SEEK_SECONDS seconds", action(ACTION_BACK, 5))
             .addAction(
                 if (state.playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
                 if (state.playing) "Pause" else "Play", action(ACTION_TOGGLE, 2),
             )
+            .addAction(R.drawable.ic_forward_10, "Forward $SEEK_SECONDS seconds", action(ACTION_FORWARD, 6))
             .addAction(android.R.drawable.ic_media_next, "Next", action(ACTION_NEXT, 3))
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", action(ACTION_STOP, 4))
-            .setStyle(MediaStyle().setMediaSession(session.sessionToken).setShowActionsInCompactView(0, 1, 2))
+            // Collapsed (Android 12 and older): back 10, play/pause, forward 10.
+            .setStyle(MediaStyle().setMediaSession(session.sessionToken).setShowActionsInCompactView(1, 2, 3))
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOngoing(true)
+            // Media notifications show five buttons at most, so Stop gives way to the jumps: while paused
+            // the notification can be swiped away instead, which stops reading.
+            .setOngoing(state.playing)
+            .setDeleteIntent(action(ACTION_STOP, 4))
             .setSilent(true)
             .build()
     }
@@ -142,6 +163,8 @@ class ReaderService : Service() {
         private const val ACTION_NEXT = "com.guidedtour.app.NEXT"
         private const val ACTION_PREVIOUS = "com.guidedtour.app.PREVIOUS"
         private const val ACTION_STOP = "com.guidedtour.app.STOP"
+        private const val ACTION_BACK = "com.guidedtour.app.BACK"
+        private const val ACTION_FORWARD = "com.guidedtour.app.FORWARD"
 
         fun start(context: Context) =
             ContextCompat.startForegroundService(context, Intent(context, ReaderService::class.java))

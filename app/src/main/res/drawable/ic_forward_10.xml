@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material "forward_10" icon (Icons.Filled.Forward10), for the notification and lock screen. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18.0 13.0c0.0 3.31 -2.69 6.0 -6.0 6.0s-6.0 -2.69 -6.0 -6.0s2.69 -6.0 6.0 -6.0v4.0l5.0 -5.0l-5.0 -5.0v4.0c-4.42 0.0 -8.0 3.58 -8.0 8.0c0.0 4.42 3.58 8.0 8.0 8.0s8.0 -3.58 8.0 -8.0H18.0Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10.86 15.94l0.0 -4.27l-0.09 0.0l-1.77 0.63l0.0 0.69l1.01 -0.31l0.0 3.26Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12.25 13.44v0.74c0.0 1.9 1.31 1.82 1.44 1.82c0.14 0.0 1.44 0.09 1.44 -1.82v-0.74c0.0 -1.9 -1.31 -1.82 -1.44 -1.82C13.55 11.62 12.25 11.53 12.25 13.44ZM14.29 13.32v0.97c0.0 0.77 -0.21 1.03 -0.59 1.03c-0.38 0.0 -0.6 -0.26 -0.6 -1.03v-0.97c0.0 -0.75 0.22 -1.01 0.59 -1.01C14.07 12.3 14.29 12.57 14.29 13.32Z" />
+</vector>

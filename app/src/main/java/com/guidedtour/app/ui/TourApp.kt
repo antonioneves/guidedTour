@@ -10,6 +10,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -143,7 +145,8 @@ fun TourApp(viewModel: TourViewModel) {
                 }
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
             }
-            AnimatedVisibility(player.active) {
+            // Solid behind the floating player, or the camera preview would show through its margins.
+            AnimatedVisibility(player.active, modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
                 NowPlayingBar(player, viewModel, onOpenQueue = { showQueue = true })
             }
         }
