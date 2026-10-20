@@ -16,6 +16,7 @@ import android.graphics.Matrix
 import android.net.Uri
 import android.provider.Settings
 import android.os.SystemClock
+import androidx.camera.core.ExperimentalZeroShutterLag
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -108,11 +109,18 @@ private const val AUTO_CAPTURE_MS = 2500L
 private const val IDLE_RELEASE_MS = 20_000L
 private const val CAREFUL_PHOTOS = 3
 private const val FLASH_MS = 250
+private const val SWITCH_AFTER_MS = 300L
 
 /** Takes one photo; null if the camera failed. The caller owns (and must close) the image. */
-private suspend fun takePhoto(controller: LifecycleCameraController, executor: java.util.concurrent.Executor): ImageProxy? =
+/** Takes one photo. [onStarted] runs at the moment of capture, before the photo is processed. */
+private suspend fun takePhoto(
+    controller: LifecycleCameraController,
+    executor: java.util.concurrent.Executor,
+    onStarted: () -> Unit = {},
+): ImageProxy? =
     suspendCancellableCoroutine { cont ->
         controller.takePicture(executor, object : ImageCapture.OnImageCapturedCallback() {
+            override fun onCaptureStarted() = onStarted()
             override fun onCaptureSuccess(image: ImageProxy) = cont.resume(image) { image.close() }
             override fun onError(exception: ImageCaptureException) = cont.resume(null) {}
         })
@@ -244,7 +252,7 @@ private fun CameraPermissionNeeded() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalZeroShutterLag::class)
 @Composable
 private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () -> Unit, onCaptured: () -> Unit) {
     val context = LocalContext.current
@@ -279,7 +287,10 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
     val controller = remember {
         LifecycleCameraController(context).apply {
             setEnabledUseCases(CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE)
-            imageCaptureMode = ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY
+            // Zero shutter lag keeps the frame from the moment of the tap, so the app can move to
+            // Guides at once without the photo blurring as the phone is lowered. Phones without it
+            // fall back to the normal mode.
+            imageCaptureMode = ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG
             isTapToFocusEnabled = true
             isPinchToZoomEnabled = true
         }
@@ -328,16 +339,19 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
         val liveText = frame.text
         val photos = if (careful) CAREFUL_PHOTOS else 1
         scope.launch {
+            var switched = false
+            fun showGuides() { if (!switched) { switched = true; onCaptured() } }
+            // Go to Guides (with its "Reading the text…" card) once the first photo is taken, or
+            // shortly after the tap if the camera is slow to start.
+            launch { delay(SWITCH_AFTER_MS); showGuides() }
             // Take a few photos in a row; the view model keeps the sharpest and reads it.
             repeat(photos) { i ->
                 // A camera-style flash on the first photo shows the capture happened.
                 if (i == 0) launch { flash.snapTo(0.85f); flash.animateTo(0f, tween(FLASH_MS)) }
-                val image = takePhoto(controller, ContextCompat.getMainExecutor(context))
+                val image = takePhoto(controller, ContextCompat.getMainExecutor(context), onStarted = ::showGuides)
                 if (image != null) viewModel.addFrame(image)
             }
             viewModel.finishCapture(liveText)
-            // The new card appears in Guides, with a loading card while the photo is read.
-            onCaptured()
         }
     }
 

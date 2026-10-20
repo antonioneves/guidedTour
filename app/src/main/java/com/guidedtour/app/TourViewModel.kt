@@ -44,7 +44,8 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     val settings = Settings.get(app)
 
     val scans: StateFlow<List<Scan>> =
-        dao.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        // Loaded from the start, so Guides never opens on an empty list while the database is read.
+        dao.observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val player: StateFlow<PlayerState> = reader.state
 
     private val _state = MutableStateFlow<ScanState>(ScanState.Idle)
