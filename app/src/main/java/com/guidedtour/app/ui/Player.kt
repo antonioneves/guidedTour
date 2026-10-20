@@ -370,7 +370,6 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
                     Text(it, style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace))
                 }
             }
-            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Done") }
         }
     }
 }
