@@ -1,6 +1,9 @@
 package com.guidedtour.app.ui
 
 import android.Manifest
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.DrawableRes
@@ -21,8 +24,12 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +43,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -72,6 +80,14 @@ fun TourApp(viewModel: TourViewModel) {
     val snackbar = remember { SnackbarHostState() }
 
     LaunchedEffect(selected) { viewModel.scanTabVisible.value = selected == Tab.Scan }
+    // The camera turns with the phone even when auto-rotate is off, so a landscape photo has an
+    // upright, landscape interface (and comes out upright). The other tabs follow the phone's setting.
+    val activity = LocalActivity.current
+    DisposableEffect(selected, activity) {
+        activity?.requestedOrientation =
+            if (selected == Tab.Scan) ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        onDispose { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+    }
     // Show each new scan in Guides as soon as it's read (from the camera, after its photo has dropped
     // into the tab); go back to the camera if no text was found.
     val scanState by viewModel.state.collectAsStateWithLifecycle()
@@ -95,7 +111,11 @@ fun TourApp(viewModel: TourViewModel) {
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
 
     Box(Modifier.fillMaxSize()) {
+    // In landscape the tabs move to a rail at the side, leaving the camera its full height.
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val adaptive = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
     NavigationSuiteScaffold(
+        layoutType = if (landscape && adaptive == NavigationSuiteType.NavigationBar) NavigationSuiteType.NavigationRail else adaptive,
         navigationSuiteItems = {
             Tab.entries.forEach { tab ->
                 item(

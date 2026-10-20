@@ -3,6 +3,7 @@ package com.guidedtour.app.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Matrix
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -10,8 +11,8 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.net.Uri
 import android.os.SystemClock
-import android.util.Log
 import android.provider.Settings
+import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -46,8 +47,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.BlurOn
 import androidx.compose.material.icons.outlined.CropFree
 import androidx.compose.material.icons.outlined.DocumentScanner
-import androidx.compose.material.icons.outlined.PanTool
 import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.PanTool
 import androidx.compose.material.icons.outlined.ZoomIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -91,6 +92,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -489,10 +491,12 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, flight: Ca
             colors = IconButtonDefaults.iconButtonColors(containerColor = Color.Black.copy(alpha = 0.45f), contentColor = Color.White),
         ) { Icon(Icons.Filled.Settings, "Settings") }
 
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp))
+        // Like a camera app: the shutter sits at the bottom in portrait and at the side in landscape.
+        val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (landscape) 16.dp else 140.dp))
         if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
 
-        Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp)) {
+        Box(if (landscape) Modifier.align(Alignment.CenterEnd).padding(end = 28.dp) else Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp)) {
             if (state == ScanState.Processing) {
                 Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.size(92.dp)) {
                     Box(contentAlignment = Alignment.Center) { LoadingIndicator() }

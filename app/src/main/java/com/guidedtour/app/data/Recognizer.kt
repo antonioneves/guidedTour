@@ -27,7 +27,8 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** What OCR found: reading-order text (paragraphs split by a blank line) and how sure the engine was. */
-class Reading(val text: String, val confidence: Float, val letters: Int) {
+/** [turn] is how far, in degrees clockwise, the photo had to be turned for the text to read upright. */
+class Reading(val text: String, val confidence: Float, val letters: Int, val turn: Int = 0) {
     val isEmpty: Boolean get() = text.isBlank()
 }
 
@@ -80,17 +81,45 @@ object Recognizer {
      * contrast; whichever pass looks more reliable wins.
      */
     suspend fun read(bitmap: Bitmap, script: OcrScript, enhance: Boolean = true): Reading {
-        val first = firstPass(bitmap, script)
+        var source = bitmap
+        var turn = 0
+        var first = firstPass(bitmap, script)
+        // Sideways text (the phone turned while the screen stayed upright, or a plaque mounted on its
+        // side) reads poorly: if this one did, try a quarter turn each way and keep the best.
+        if (enhance && (looksSideways(first.blocks) || looksWeak(first.reading))) {
+            for (degrees in listOf(90, 270)) {
+                val turned = withContext(Dispatchers.Default) { rotated(bitmap, degrees.toFloat()) }
+                val pass = firstPass(turned, script)
+                if (isBetter(pass.reading, first.reading)) {
+                    if (source !== bitmap) source.recycle()
+                    source = turned
+                    turn = degrees
+                    first = pass
+                } else {
+                    turned.recycle()
+                }
+            }
+        }
         var best = first.reading
         if (enhance && first.blocks.isNotEmpty()) {
             // Straighten or crop around the kept text only, so neighbouring plaques fall outside.
-            val improved = withContext(Dispatchers.Default) { enhanced(bitmap, first.kept) }
+            val improved = withContext(Dispatchers.Default) { enhanced(source, first.kept) }
             val second = Pass(first.script, recognize(client(first.script), improved), improved.width, improved.height).reading
             improved.recycle()
             if (isBetter(second, best)) best = second
         }
-        return best
+        if (source !== bitmap) source.recycle()
+        return Reading(best.text, best.confidence, best.letters, turn)
     }
+
+    /** Most lines of three or more characters are taller than wide: the text is lying on its side. */
+    private fun looksSideways(blocks: List<OcrBlock>): Boolean {
+        val lines = blocks.flatMap { it.lines }.filter { it.text.trim().length >= 3 }
+        return lines.isNotEmpty() && lines.count { it.height > 1.5 * (it.right - it.left) } * 2 > lines.size
+    }
+
+    /** Few letters or low confidence: worth trying the photo turned sideways. */
+    private fun looksWeak(reading: Reading) = reading.letters < 40 || reading.confidence < 0.7f
 
     private fun isBetter(candidate: Reading, current: Reading): Boolean =
         (candidate.letters >= current.letters * 0.9 && candidate.confidence >= current.confidence) ||

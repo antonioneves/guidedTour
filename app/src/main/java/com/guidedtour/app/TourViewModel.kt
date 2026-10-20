@@ -106,7 +106,11 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
                 persist(liveText, null)
             } else {
                 val reading = Recognizer.read(frame, settings.script.value)
-                persist(reading.text.ifBlank { liveText }, frame)
+                // Save the photo the way the text reads, if it had to be turned.
+                val photo = if (reading.turn == 0) frame else withContext(Dispatchers.Default) {
+                    Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, android.graphics.Matrix().apply { postRotate(reading.turn.toFloat()) }, true)
+                }
+                persist(reading.text.ifBlank { liveText }, photo)
             }
         }
     }

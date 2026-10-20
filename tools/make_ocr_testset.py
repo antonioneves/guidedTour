@@ -86,6 +86,12 @@ def main(out):
     draw_lines(img, [CREDIT], (130, 1050), 24)
     cases["two_columns"] = (img, " ".join([TITLE] + COL1 + COL2))
 
+    # Taken with the phone turned sideways while the screen stayed upright: the text lies on its side.
+    img = canvas(); draw_lines(img, PARAGRAPH, (120, 260), 54)
+    cases["sideways"] = (img.rotate(90, expand=True), truth)
+    img = canvas(color=(150, 148, 142)); draw_lines(img, PARAGRAPH, (120, 260), 54, fill=(112, 110, 104))
+    cases["sideways_lowcontrast"] = (noise(img, 6, 3).rotate(270, expand=True), truth)
+
     # The plaque in the middle, with part of the next plaque cut off at the right edge.
     img = canvas(color=(120, 110, 100))
     ImageDraw.Draw(img).rectangle((60, 220, 1240, 760), fill=(205, 198, 182))
