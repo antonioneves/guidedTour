@@ -2,14 +2,13 @@ package com.guidedtour.app.ui
 
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.annotation.DrawableRes
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Notes
-import androidx.compose.material.icons.automirrored.outlined.Notes
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.outlined.CameraAlt
@@ -30,14 +29,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.guidedtour.app.R
 import com.guidedtour.app.TourViewModel
 
-private enum class Tab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
+private enum class Tab(val label: String, val icon: ImageVector?, val selectedIcon: ImageVector?, @DrawableRes val iconRes: Int? = null) {
     Scan("Scan", Icons.Outlined.CameraAlt, Icons.Filled.CameraAlt),
     Places("Places", Icons.Outlined.Map, Icons.Filled.Map),
-    Texts("Texts", Icons.AutoMirrored.Outlined.Notes, Icons.AutoMirrored.Filled.Notes),
+    // The five columns from the app icon; one silhouette serves both states.
+    Guides("Guides", null, null, R.drawable.ic_tab_guides),
 }
 
 @Composable
@@ -69,7 +71,11 @@ fun TourApp(viewModel: TourViewModel) {
                 item(
                     selected = selected == tab,
                     onClick = { selected = tab },
-                    icon = { Icon(if (selected == tab) tab.selectedIcon else tab.icon, contentDescription = null) },
+                    icon = {
+                        val vector = if (selected == tab) tab.selectedIcon else tab.icon
+                        if (vector != null) Icon(vector, contentDescription = null)
+                        else Icon(painterResource(tab.iconRes!!), contentDescription = null)
+                    },
                     label = { Text(tab.label) },
                 )
             }
@@ -86,7 +92,7 @@ fun TourApp(viewModel: TourViewModel) {
                 when (selected) {
                     Tab.Scan -> Unit
                     Tab.Places -> Surface(Modifier.fillMaxSize()) { MapScreen(viewModel) }
-                    Tab.Texts -> Surface(Modifier.fillMaxSize()) { TextsScreen(viewModel, onOpenSettings = { showSettings = true }) }
+                    Tab.Guides -> Surface(Modifier.fillMaxSize()) { TextsScreen(viewModel, onOpenSettings = { showSettings = true }) }
                 }
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
             }

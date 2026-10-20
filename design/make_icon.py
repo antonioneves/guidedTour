@@ -176,6 +176,20 @@ def android_notification():
     return vector(body, size=24, viewport=24, aapt=False)
 
 
+def android_tab_icon():
+    # Navigation-bar icon for the Guides tab: just the five columns (the sound-wave arrangement from
+    # the app icon), as a single-colour silhouette that the navigation bar tints. Flutes are left out
+    # because they vanish at 24dp.
+    allcols = " ".join(s for _, s, _ in columns)
+    span = 2 * (10 + 2.1)  # the five columns are 24.2 units wide
+    scale = 20 / span      # fit the 20dp live area of a 24dp icon
+    body = (f'    <group android:pivotX="{cx}" android:pivotY="{cy}" android:scaleX="{scale:.4f}" '
+            f'android:scaleY="{scale:.4f}" android:translateX="{12 - cx:.3f}" android:translateY="{12 - cy:.3f}">\n'
+            f'        <path android:fillColor="#FF000000" android:pathData="{allcols}" />\n'
+            f'    </group>\n')
+    return vector(body, size=24, viewport=24, aapt=False)
+
+
 # ---------------------------------------------------------------- SVG (store artwork, previews)
 
 def svg_stops(stops):
@@ -262,6 +276,7 @@ if __name__ == "__main__":
     write(os.path.join(RES, "drawable", "ic_launcher_background.xml"), android_background())
     write(os.path.join(RES, "drawable", "ic_launcher_monochrome.xml"), android_monochrome())
     write(os.path.join(RES, "drawable", "ic_notification.xml"), android_notification())
+    write(os.path.join(RES, "drawable", "ic_tab_guides.xml"), android_tab_icon())
     write(os.path.join(STORE, "play-store-icon.svg"), svg_play_icon())
     write(os.path.join(STORE, "feature-graphic.svg"), svg_feature_graphic())
     write(os.path.join(ROOT, "design", "preview.svg"), svg_preview())

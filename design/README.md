@@ -23,6 +23,7 @@ All geometry and colours live in `make_icon.py`; edit there and rerun both scrip
 | `app/src/main/res/drawable/ic_launcher_foreground.xml` | Adaptive icon foreground layer; also the splash screen icon |
 | `app/src/main/res/drawable/ic_launcher_monochrome.xml` | Themed (Material You) icon on Android 13+ |
 | `app/src/main/res/drawable/ic_notification.xml` | Status bar icon for the "Reading aloud" notification |
+| `app/src/main/res/drawable/ic_tab_guides.xml` | Navigation-bar icon of the Guides tab (the five columns only) |
 | `design/store/play-store-icon-512.png` | Play Store listing icon (512×512, 32-bit PNG) |
 | `design/store/feature-graphic-1024x500.png` | Play Store feature graphic (1024×500, 24-bit PNG) |
 | `design/store/*.svg` | Vector sources of the two store images |
