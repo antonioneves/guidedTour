@@ -112,6 +112,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun persist(text: String, photo: Bitmap?) {
+        android.util.Log.i("GuidedTour", "capture: read ${text.length} characters")
         if (text.isBlank()) {
             _state.value = ScanState.NoText
             return

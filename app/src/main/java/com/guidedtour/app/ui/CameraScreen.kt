@@ -10,6 +10,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.net.Uri
 import android.os.SystemClock
+import android.util.Log
 import android.provider.Settings
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.BlurOn
 import androidx.compose.material.icons.outlined.CropFree
 import androidx.compose.material.icons.outlined.DocumentScanner
+import androidx.compose.material.icons.outlined.PanTool
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.ZoomIn
 import androidx.compose.material3.Button
@@ -119,6 +121,8 @@ private const val IDLE_RELEASE_MS = 20_000L
 private const val CAREFUL_PHOTOS = 3
 private const val FLASH_MS = 250
 private const val SHRINK_MS = 450
+private const val MIN_HOLD_STILL_MS = 1000L
+private const val TAG = "GuidedTour"
 private const val CARD_SCALE = 0.6f
 private const val CARD_LIFT = 0.04f
 
@@ -359,13 +363,18 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, flight: Ca
         snapshot = previewView?.bitmap?.asImageBitmap()
         scope.launch { flash.snapTo(0.85f); flash.animateTo(0f, tween(FLASH_MS)) }
         scope.launch { shrink.snapTo(0f); shrink.animateTo(1f, tween(SHRINK_MS, easing = FastOutSlowInEasing)) }
+        val tapped = SystemClock.elapsedRealtime()
+        Log.i(TAG, "capture: tap, $photos photo(s)")
         scope.launch {
             // Take a few photos in a row; the view model keeps the sharpest and reads it.
-            repeat(photos) {
+            repeat(photos) { i ->
                 val image = takePhoto(controller, ContextCompat.getMainExecutor(context))
+                Log.i(TAG, "capture: photo ${i + 1} ${if (image != null) "taken" else "failed"} at ${SystemClock.elapsedRealtime() - tapped} ms")
                 if (image != null) viewModel.addFrame(image)
             }
             viewModel.finishCapture(liveText)
+            // Keep "Hold still…" up for a moment even when the photos were quick, so it can be read.
+            delay((MIN_HOLD_STILL_MS - (SystemClock.elapsedRealtime() - tapped)).coerceAtLeast(0))
             photosTaken = true
         }
     }
@@ -421,9 +430,22 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, flight: Ca
             },
         )
 
-        // Live outline of every detected line: green when readable, amber otherwise.
+        // While a capture is processed, the photographed frame shrinks into a card over the dimmed
+        // camera; the indications below are drawn on top of it.
+        val processing = state == ScanState.Processing
+        if (processing || (state is ScanState.Done && snapshot != null)) {
+            CaptureOverlay(
+                snapshot = snapshot,
+                progress = shrink.value,
+                handedOver = drop.value > 0f,
+                scrim = 1f - flight.progress.value,
+            )
+        }
+
+        // Live outline of every detected line: green when readable, amber otherwise. Hidden while
+        // processing, as it would no longer match the shrinking photo.
         val outline = if (tip.ok) ScanGreen else ScanAmber
-        Canvas(Modifier.fillMaxSize()) {
+        if (!processing) Canvas(Modifier.fillMaxSize()) {
             val pad = 4.dp.toPx()
             frame.lines.forEach {
                 val topLeft = Offset(it.left - pad, it.top - pad)
@@ -438,10 +460,11 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, flight: Ca
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            TipPill(
-                tip = tip,
-                message = if (autoActive) "Hold steady – capturing…" else tip.message,
-            )
+            when {
+                processing && !photosTaken -> StatusPill(Icons.Outlined.PanTool, "Hold still…", highlight = true)
+                processing -> StatusPill(Icons.Outlined.DocumentScanner, "Reading the text…")
+                else -> TipPill(tip = tip, message = if (autoActive) "Hold steady – capturing…" else tip.message)
+            }
             FilterChip(
                 selected = autoCapture,
                 onClick = { autoCapture = !autoCapture },
@@ -466,16 +489,6 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, flight: Ca
             colors = IconButtonDefaults.iconButtonColors(containerColor = Color.Black.copy(alpha = 0.45f), contentColor = Color.White),
         ) { Icon(Icons.Filled.Settings, "Settings") }
 
-        val processing = state == ScanState.Processing
-        if (processing || (state is ScanState.Done && snapshot != null)) {
-            CaptureOverlay(
-                snapshot = snapshot,
-                progress = shrink.value,
-                handedOver = drop.value > 0f,
-                scrim = 1f - flight.progress.value,
-                message = if (photosTaken) "Reading the text…" else "Hold still…",
-            )
-        }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp))
         if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
 
@@ -492,13 +505,12 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, flight: Ca
 }
 
 /**
- * Shown while a capture is processed: [message] above the shutter and, once the photos are taken,
- * the photographed frame shrinking into a card in the middle of a dimmed screen ([progress] 0 to 1).
- * Once [handedOver], the card is flying into the Guides tab (see [CaptureFlight]) and only the
- * dimmed background remains, fading out.
+ * Shown while a capture is processed: the photographed frame shrinking into a card in the middle of
+ * a dimmed screen ([progress] 0 to 1). Once [handedOver], the card is flying into the Guides tab
+ * (see [CaptureFlight]) and only the dimmed background remains, fading out with [scrim].
  */
 @Composable
-private fun CaptureOverlay(snapshot: ImageBitmap?, progress: Float, handedOver: Boolean, scrim: Float, message: String) {
+private fun CaptureOverlay(snapshot: ImageBitmap?, progress: Float, handedOver: Boolean, scrim: Float) {
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f * progress * scrim))) {
         if (snapshot != null && !handedOver) {
             val corner = (28 * progress).dp
@@ -519,24 +531,18 @@ private fun CaptureOverlay(snapshot: ImageBitmap?, progress: Float, handedOver: 
                     },
             )
         }
-        if (!handedOver) {
-            Surface(
-                shape = CircleShape,
-                color = Color.Black.copy(alpha = 0.6f),
-                contentColor = Color.White,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp).semantics { liveRegion = LiveRegionMode.Polite },
-            ) {
-                Text(message, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
-            }
-        }
     }
 }
 
 @Composable
-private fun TipPill(tip: Tip, message: String) {
+private fun TipPill(tip: Tip, message: String) = StatusPill(tip.icon(), message, highlight = tip.ok)
+
+/** The pill at the top of the camera: a photo tip, or what a capture is doing. */
+@Composable
+private fun StatusPill(icon: ImageVector, message: String, highlight: Boolean = false) {
     Surface(
         shape = CircleShape,
-        color = if (tip.ok) GoodGreen else Color.Black.copy(alpha = 0.6f),
+        color = if (highlight) GoodGreen else Color.Black.copy(alpha = 0.6f),
         contentColor = Color.White,
         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
     ) {
@@ -545,7 +551,7 @@ private fun TipPill(tip: Tip, message: String) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(tip.icon(), null, Modifier.size(20.dp))
+            Icon(icon, null, Modifier.size(20.dp))
             Text(message, style = MaterialTheme.typography.labelLarge)
         }
     }
