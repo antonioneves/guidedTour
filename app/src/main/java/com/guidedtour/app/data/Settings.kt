@@ -29,6 +29,9 @@ class Settings private constructor(context: Context) {
     private val _duckMusic = MutableStateFlow(prefs.getBoolean("duckMusic", false))
     /** False (default): other apps' audio is paused while reading. True: it is only turned down. */
     val duckMusic: StateFlow<Boolean> = _duckMusic
+    private val _carefulCapture = MutableStateFlow(prefs.getBoolean("carefulCapture", true))
+    /** Take three photos and keep the sharpest. */
+    val carefulCapture: StateFlow<Boolean> = _carefulCapture
     private val _volumeShutter = MutableStateFlow(prefs.getBoolean("volumeShutter", false))
     val volumeShutter: StateFlow<Boolean> = _volumeShutter
     private val _script = MutableStateFlow(
@@ -52,6 +55,7 @@ class Settings private constructor(context: Context) {
     fun setPitch(value: Float) { _pitch.value = value; prefs.edit().putFloat("pitch", value).apply() }
     fun setQueueNewScans(value: Boolean) { _queueNewScans.value = value; prefs.edit().putBoolean("queueNewScans", value).apply() }
     fun setDuckMusic(value: Boolean) { _duckMusic.value = value; prefs.edit().putBoolean("duckMusic", value).apply() }
+    fun setCarefulCapture(value: Boolean) { _carefulCapture.value = value; prefs.edit().putBoolean("carefulCapture", value).apply() }
     fun setVolumeShutter(value: Boolean) { _volumeShutter.value = value; prefs.edit().putBoolean("volumeShutter", value).apply() }
     fun setScript(value: OcrScript) { _script.value = value; prefs.edit().putString("script", value.name).apply() }
 }

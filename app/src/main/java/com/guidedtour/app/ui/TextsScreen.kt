@@ -76,6 +76,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.guidedtour.app.TourViewModel
 import com.guidedtour.app.data.PlayerState
+import com.guidedtour.app.data.paragraphsOf
 import com.guidedtour.app.data.Scan
 import com.guidedtour.app.data.Translator
 import com.guidedtour.app.data.Visit
@@ -219,6 +220,8 @@ private fun ScanCard(scan: Scan, player: PlayerState, translating: Boolean, view
     var expanded by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
+    var choosing by remember { mutableStateOf(false) }
+    var confirmCloud by remember { mutableStateOf(false) }
     val current = player.current?.takeIf { it.id == scan.id }
     val active = current != null
     val playing = active && player.playing
@@ -261,6 +264,20 @@ private fun ScanCard(scan: Scan, player: PlayerState, translating: Boolean, view
                             leadingIcon = { Icon(Icons.Filled.Edit, null) },
                             onClick = { menu = false; editing = true },
                         )
+                        if (paragraphsOf(scan.text).size > 1) {
+                            DropdownMenuItem(
+                                text = { Text("Choose paragraphs") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Notes, null) },
+                                onClick = { menu = false; choosing = true },
+                            )
+                        }
+                        if (viewModel.cloudAvailable && scan.thumbnail != null) {
+                            DropdownMenuItem(
+                                text = { Text("Improve with cloud") },
+                                leadingIcon = { Icon(Icons.Filled.Translate, null) },
+                                onClick = { menu = false; confirmCloud = true },
+                            )
+                        }
                         if (Translator.needsTranslation(scan.languageTag)) {
                             DropdownMenuItem(
                                 text = { Text(if (scan.translation != null) "Translate again" else "Translate") },
@@ -314,6 +331,8 @@ private fun ScanCard(scan: Scan, player: PlayerState, translating: Boolean, view
         }
     }
     if (editing) EditTextDialog(scan.text, onDismiss = { editing = false }) { viewModel.editText(scan, it) }
+    if (choosing) ChooseParagraphsDialog(scan.text, onDismiss = { choosing = false }) { viewModel.editText(scan, it) }
+    if (confirmCloud) CloudConfirmDialog(onDismiss = { confirmCloud = false }) { viewModel.improveWithCloud(scan) }
 }
 
 @Composable

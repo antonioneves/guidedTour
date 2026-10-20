@@ -6,9 +6,6 @@ import java.util.Locale
 /** A speakable piece of a longer text; [start] is its offset in the original string. */
 data class Chunk(val start: Int, val text: String)
 
-/** Joins OCR text into a single speakable paragraph. */
-fun cleanOcr(raw: String): String = raw.replace("-\n", "").replace('\n', ' ').trim()
-
 /**
  * Splits [text] into sentences, none longer than [maxLen], so long plaques stay under the speech
  * engine's input limit and can be paused or resumed at sentence boundaries.

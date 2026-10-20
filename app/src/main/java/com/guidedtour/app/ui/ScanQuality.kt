@@ -7,7 +7,7 @@ class LineBox(val left: Int, val top: Int, val right: Int, val bottom: Int, val 
 }
 
 /** What the live camera analysis saw in the latest frame. */
-class LiveFrame(val text: String, val lines: List<LineBox>, val brightness: Int)
+class LiveFrame(val text: String, val lines: List<LineBox>, val brightness: Int, val glare: Float = 0f)
 
 enum class Tip(val message: String, val ok: Boolean = false) {
     NoText("Point the camera at the text"),
@@ -15,11 +15,19 @@ enum class Tip(val message: String, val ok: Boolean = false) {
     TooSmall("Text is too small – move closer"),
     CutOff("Text is cut off – center it in the frame"),
     Unclear("Hard to read – hold steady and avoid glare"),
+    Shaky("Hold the phone steady"),
+    Glare("Readable, but glare may hurt – tilt the phone", ok = true),
     Good("Looks readable – tap to read aloud", ok = true),
 }
 
-/** Thresholds are tunable heuristics: line height is relative to the view height. */
-fun evaluate(frame: LiveFrame, viewWidth: Int, viewHeight: Int): Tip {
+/** Share of near-white pixels in the frame above which we warn about glare. */
+const val GLARE_SHARE = 0.06f
+
+/**
+ * Thresholds are tunable heuristics: line height is relative to the view height. [steady] is false
+ * while the phone is being moved (from the gyroscope).
+ */
+fun evaluate(frame: LiveFrame, viewWidth: Int, viewHeight: Int, steady: Boolean = true): Tip {
     if (frame.brightness < 40) return Tip.Dark
     if (frame.lines.isEmpty() || viewWidth == 0 || viewHeight == 0) return Tip.NoText
 
@@ -34,5 +42,7 @@ fun evaluate(frame: LiveFrame, viewWidth: Int, viewHeight: Int): Tip {
     if (touchesEdge) return Tip.CutOff
 
     if (frame.lines.map { it.confidence }.average() < 0.7) return Tip.Unclear
+    if (!steady) return Tip.Shaky
+    if (frame.glare > GLARE_SHARE) return Tip.Glare
     return Tip.Good
 }

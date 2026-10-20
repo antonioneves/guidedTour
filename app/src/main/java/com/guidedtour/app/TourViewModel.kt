@@ -6,6 +6,8 @@ import androidx.camera.core.ImageProxy
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.guidedtour.app.data.AppDatabase
+import com.guidedtour.app.data.Accuracy
+import com.guidedtour.app.data.CloudOcr
 import com.guidedtour.app.data.Locator
 import com.guidedtour.app.data.PlayerState
 import com.guidedtour.app.data.QueueItem
@@ -66,24 +68,46 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
 
     // ---- Scanning ----
 
-    /** Reads the still photo; if that finds nothing, falls back to [liveText] seen in the preview. */
-    fun onPhotoCaptured(image: ImageProxy, liveText: String) {
-        if (!begin()) { image.close(); return }
-        viewModelScope.launch {
-            val photo = Recognizer.readPhoto(image, settings.script.value)
-            persist(photo.text.ifBlank { liveText }, photo.bitmap)
+    // Careful capture takes several photos; we keep only the sharpest to save memory.
+    private var bestFrame: Bitmap? = null
+    private var bestSharpness = -1.0
+
+    /** Starts a capture. Returns false if one is already being processed. */
+    fun beginCapture(): Boolean {
+        if (_state.value == ScanState.Processing) return false
+        _state.value = ScanState.Processing
+        bestFrame?.recycle()
+        bestFrame = null
+        bestSharpness = -1.0
+        return true
+    }
+
+    /** Offers one photo of the current capture; closes [image]. */
+    suspend fun addFrame(image: ImageProxy) {
+        val bitmap = runCatching { Recognizer.toUprightBitmap(image) }.getOrNull() ?: return
+        val sharpness = withContext(Dispatchers.Default) { Recognizer.sharpness(bitmap) }
+        if (sharpness > bestSharpness) {
+            bestFrame?.recycle()
+            bestFrame = bitmap
+            bestSharpness = sharpness
+        } else {
+            bitmap.recycle()
         }
     }
 
-    fun onCaptureFailed(liveText: String) {
-        if (!begin()) return
-        viewModelScope.launch { persist(liveText, null) }
-    }
-
-    private fun begin(): Boolean {
-        if (_state.value == ScanState.Processing) return false
-        _state.value = ScanState.Processing
-        return true
+    /** Reads the sharpest photo; if that finds nothing, falls back to [liveText] seen in the preview. */
+    fun finishCapture(liveText: String) {
+        val frame = bestFrame
+        bestFrame = null
+        bestSharpness = -1.0
+        viewModelScope.launch {
+            if (frame == null) {
+                persist(liveText, null)
+            } else {
+                val reading = Recognizer.read(frame, settings.script.value)
+                persist(reading.text.ifBlank { liveText }, frame)
+            }
+        }
     }
 
     private suspend fun persist(text: String, photo: Bitmap?) {
@@ -112,10 +136,10 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
 
     private suspend fun saveThumbnail(photo: Bitmap, timestamp: Long): String? = withContext(Dispatchers.IO) {
         runCatching {
-            val scale = 640f / maxOf(photo.width, photo.height)
+            val scale = 1280f / maxOf(photo.width, photo.height)
             val small = if (scale < 1f) Bitmap.createScaledBitmap(photo, (photo.width * scale).toInt(), (photo.height * scale).toInt(), true) else photo
             val dir = File(app.filesDir, "thumbs").apply { mkdirs() }
-            File(dir, "$timestamp.jpg").also { file -> file.outputStream().use { small.compress(Bitmap.CompressFormat.JPEG, 80, it) } }.absolutePath
+            File(dir, "$timestamp.jpg").also { file -> file.outputStream().use { small.compress(Bitmap.CompressFormat.JPEG, 85, it) } }.absolutePath
         }.getOrNull()
     }
 
@@ -182,6 +206,38 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
                 _state.value = ScanState.Done(it.scan.copy(text = text, languageTag = language, translation = null, translationTag = null))
             }
         }
+    }
+
+    // ---- Cloud reading and accuracy testing ----
+
+    val cloudAvailable: Boolean get() = CloudOcr.available
+
+    /** Ids of scans being re-read in the cloud. */
+    private val _cloudReading = MutableStateFlow<Set<Long>>(emptySet())
+    val cloudReading: StateFlow<Set<Long>> = _cloudReading
+
+    /** Uploads the saved photo to Google Cloud Vision and replaces the text with its result. Ask the user first. */
+    fun improveWithCloud(scan: Scan) {
+        val photo = scan.thumbnail?.let(::File)?.takeIf { it.exists() }
+        if (photo == null) { _messages.tryEmit("There's no saved photo for this text."); return }
+        if (scan.id in _cloudReading.value) return
+        _cloudReading.value += scan.id
+        viewModelScope.launch {
+            when (val result = CloudOcr.read(photo)) {
+                is CloudOcr.Result.Text -> editText(scan, result.text)
+                is CloudOcr.Result.Failure -> _messages.tryEmit(result.message)
+            }
+            _cloudReading.value -= scan.id
+        }
+    }
+
+    private val _accuracyReport = MutableStateFlow<String?>(null)
+    val accuracyReport: StateFlow<String?> = _accuracyReport
+    val accuracyFolder: String get() = Accuracy.folder(app).path
+
+    fun runAccuracyTest() {
+        _accuracyReport.value = "Running…"
+        viewModelScope.launch { _accuracyReport.value = Accuracy.run(app, settings.script.value) }
     }
 
     /** Translates into the device language, stores the result and queues it for reading. */

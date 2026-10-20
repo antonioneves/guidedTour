@@ -1,0 +1,128 @@
+package com.guidedtour.app.data
+
+import kotlin.math.max
+import kotlin.math.min
+
+/** One recognised line with its pixel box, ML Kit's confidence and its tilt in degrees. */
+data class OcrLine(
+    val text: String,
+    val left: Int, val top: Int, val right: Int, val bottom: Int,
+    val confidence: Float = 1f,
+    val angle: Float = 0f,
+) {
+    val height: Int get() = bottom - top
+}
+
+/** A block of lines, roughly a paragraph. */
+data class OcrBlock(val lines: List<OcrLine>) {
+    val left: Int get() = lines.minOf { it.left }
+    val top: Int get() = lines.minOf { it.top }
+    val right: Int get() = lines.maxOf { it.right }
+    val bottom: Int get() = lines.maxOf { it.bottom }
+    val width: Int get() = right - left
+    val medianLineHeight: Int get() = lines.map { it.height }.sorted()[lines.size / 2]
+    val text: String get() = joinLines(lines.map { it.text })
+}
+
+/** Joins OCR text into a single speakable paragraph. */
+fun cleanOcr(raw: String): String = joinLines(raw.split('\n'))
+
+/**
+ * Joins lines with spaces. A trailing hyphen is dropped only when the next line continues the word
+ * in lowercase ("tem-" + "ple"), so real hyphens ("Greek-" + "Roman") survive. No space is added
+ * between Chinese, Japanese or Korean characters.
+ */
+fun joinLines(lines: List<String>): String {
+    val sb = StringBuilder()
+    for (raw in lines) {
+        val line = raw.trim()
+        if (line.isEmpty()) continue
+        if (sb.isEmpty()) { sb.append(line); continue }
+        val last = sb[sb.length - 1]
+        when {
+            last == '-' && sb.length > 1 && sb[sb.length - 2].isLetter() && line.first().isLowerCase() -> {
+                sb.setLength(sb.length - 1)
+                sb.append(line)
+            }
+            isCjk(last) && isCjk(line.first()) -> sb.append(line)
+            else -> sb.append(' ').append(line)
+        }
+    }
+    return sb.toString()
+}
+
+private fun isCjk(c: Char): Boolean = when (Character.UnicodeScript.of(c.code)) {
+    Character.UnicodeScript.HAN, Character.UnicodeScript.HIRAGANA,
+    Character.UnicodeScript.KATAKANA, Character.UnicodeScript.HANGUL -> true
+    else -> false
+}
+
+/**
+ * Reading order: top to bottom, but side-by-side columns are read one after the other, and a
+ * full-width heading splits the page into bands that are read in turn.
+ */
+fun orderBlocks(blocks: List<OcrBlock>): List<OcrBlock> {
+    if (blocks.size < 2) return blocks
+    val pageLeft = blocks.minOf { it.left }
+    val pageWidth = blocks.maxOf { it.right } - pageLeft
+    val ordered = mutableListOf<OcrBlock>()
+    var band = mutableListOf<OcrBlock>()
+    fun flush() { ordered += orderColumns(band); band = mutableListOf() }
+    for (block in blocks.sortedBy { it.top }) {
+        if (block.width > 0.7 * pageWidth) { flush(); ordered += block } else band += block
+    }
+    flush()
+    return ordered
+}
+
+private fun orderColumns(blocks: List<OcrBlock>): List<OcrBlock> {
+    val columns = mutableListOf<MutableList<OcrBlock>>()
+    for (block in blocks.sortedBy { it.left }) {
+        val column = columns.firstOrNull { col ->
+            val l = col.minOf { it.left }
+            val r = col.maxOf { it.right }
+            val overlap = min(block.right, r) - max(block.left, l)
+            overlap > 0.5 * min(block.width, r - l)
+        }
+        if (column != null) column += block else columns += mutableListOf(block)
+    }
+    return columns.sortedBy { col -> col.minOf { it.left } }.flatMap { col -> col.sortedBy { it.top } }
+}
+
+/** Drops small captions, credits and page numbers when there is clearly bigger main text. */
+fun dropNoise(blocks: List<OcrBlock>): List<OcrBlock> {
+    if (blocks.size < 2) return blocks
+    val biggest = blocks.maxOf { it.medianLineHeight }
+    val kept = blocks.filter { b ->
+        val tiny = b.medianLineHeight < 0.5 * biggest && b.text.length < 80
+        val pageNumber = b.text.trim().matches(Regex("""\d{1,4}"""))
+        !tiny && !pageNumber
+    }
+    return kept.ifEmpty { blocks }
+}
+
+/** Fixes look-alike characters inside lowercase words: "l0ve" -> "love", "tab1e" -> "table". */
+fun fixConfusables(text: String): String {
+    val letters = text.count { it.isLetter() }
+    if (letters == 0 || text.count { it.code < 128 && it.isLetter() } < letters / 2) return text
+    return text
+        .replace(Regex("""(?<=\p{Ll})0(?=\p{Ll})"""), "o")
+        .replace(Regex("""(?<=\p{Ll})[1|](?=\p{Ll})"""), "l")
+}
+
+/** Ordered, de-noised text with one blank line between paragraphs. */
+fun layoutText(blocks: List<OcrBlock>): String =
+    orderBlocks(dropNoise(blocks))
+        .map { fixConfusables(it.text) }
+        .filter { it.isNotBlank() }
+        .joinToString("\n\n")
+
+/** Average confidence weighted by how much text each line holds. */
+fun meanConfidence(blocks: List<OcrBlock>): Float {
+    val lines = blocks.flatMap { it.lines }
+    val chars = lines.sumOf { it.text.length }
+    return if (chars == 0) 0f else (lines.sumOf { (it.confidence * it.text.length).toDouble() } / chars).toFloat()
+}
+
+/** Splits saved text into its paragraphs. */
+fun paragraphsOf(text: String): List<String> = text.split(Regex("\n\\s*\n")).map { it.trim() }.filter { it.isNotEmpty() }

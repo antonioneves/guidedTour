@@ -1,7 +1,13 @@
 package com.guidedtour.app.data
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.RectF
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.vision.common.InputImage
@@ -16,12 +22,28 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
-/** Text read from a still photo plus the (upright) photo itself. */
-class PhotoResult(val text: String, val bitmap: Bitmap?)
+/** What OCR found: reading-order text (paragraphs split by a blank line) and how sure the engine was. */
+class Reading(val text: String, val confidence: Float, val letters: Int) {
+    val isEmpty: Boolean get() = text.isBlank()
+}
+
+private class Pass(val script: OcrScript, val blocks: List<OcrBlock>) {
+    val reading: Reading
+        get() {
+            val text = layoutText(blocks)
+            return Reading(text, meanConfidence(blocks), text.count { it.isLetterOrDigit() })
+        }
+}
 
 /** On-device OCR in several scripts, plus language detection so speech uses the right voice. */
 object Recognizer {
+    /** Longest side of the photo we keep: plenty for OCR, and small enough to avoid running out of memory. */
+    private const val MAX_SIDE = 2600
+
     private val clients = HashMap<OcrScript, TextRecognizer>()
     private val languageId by lazy { LanguageIdentification.getClient() }
 
@@ -36,37 +58,129 @@ object Recognizer {
         }
     }
 
-    /** Runs OCR on a full-resolution still photo. Always closes [image]. */
-    suspend fun readPhoto(image: ImageProxy, script: OcrScript): PhotoResult {
-        val bitmap = try {
-            withContext(Dispatchers.Default) {
-                val raw = image.toBitmap()
-                val degrees = image.imageInfo.rotationDegrees
-                if (degrees == 0) raw
-                else Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, Matrix().apply { postRotate(degrees.toFloat()) }, true)
+    /** Converts a camera photo to an upright bitmap (at most [MAX_SIDE] on its long side). Always closes [image]. */
+    suspend fun toUprightBitmap(image: ImageProxy): Bitmap = try {
+        withContext(Dispatchers.Default) {
+            val raw = image.toBitmap()
+            val matrix = Matrix().apply {
+                postRotate(image.imageInfo.rotationDegrees.toFloat())
+                val scale = MAX_SIDE.toFloat() / max(raw.width, raw.height)
+                if (scale < 1f) postScale(scale, scale)
             }
-        } finally {
-            image.close()
+            if (matrix.isIdentity) raw else Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
         }
-        val input = InputImage.fromBitmap(bitmap, 0)
-        val text = if (script != OcrScript.Auto) {
-            recognize(client(script), input)
-        } else {
-            // Latin first; only if it finds next to nothing do we try the other scripts.
-            val latin = recognize(client(OcrScript.Latin), input)
-            if (latin.count { it.isLetterOrDigit() } >= 12) latin
-            else (listOf(latin) + OcrScript.entries.filter { it != OcrScript.Auto && it != OcrScript.Latin }
-                .map { recognize(client(it), input) }).maxBy { it.length }
-        }
-        return PhotoResult(text, bitmap)
+    } finally {
+        image.close()
     }
 
-    private suspend fun recognize(recognizer: TextRecognizer, input: InputImage): String =
-        suspendCancellableCoroutine { cont ->
-            recognizer.process(input)
-                .addOnSuccessListener { cont.resume(cleanOcr(it.text)) }
-                .addOnFailureListener { cont.resume("") }
+    /**
+     * Reads [bitmap]. With [enhance], a second pass straightens tilted text, crops to the text and boosts
+     * contrast; whichever pass looks more reliable wins.
+     */
+    suspend fun read(bitmap: Bitmap, script: OcrScript, enhance: Boolean = true): Reading {
+        val first = firstPass(bitmap, script)
+        var best = first.reading
+        if (enhance && first.blocks.isNotEmpty()) {
+            val improved = withContext(Dispatchers.Default) { enhanced(bitmap, first.blocks) }
+            val second = Pass(first.script, recognize(client(first.script), improved)).reading
+            improved.recycle()
+            if (isBetter(second, best)) best = second
         }
+        return best
+    }
+
+    private fun isBetter(candidate: Reading, current: Reading): Boolean =
+        (candidate.letters >= current.letters * 0.9 && candidate.confidence >= current.confidence) ||
+            (candidate.letters > current.letters * 1.1 && candidate.confidence >= current.confidence * 0.95)
+
+    private suspend fun firstPass(bitmap: Bitmap, script: OcrScript): Pass {
+        if (script != OcrScript.Auto) return Pass(script, recognize(client(script), bitmap))
+        // Latin first; only if it finds next to nothing do we try the other scripts.
+        val latin = Pass(OcrScript.Latin, recognize(client(OcrScript.Latin), bitmap))
+        if (latin.reading.letters >= 12) return latin
+        val others = OcrScript.entries.filter { it != OcrScript.Auto && it != OcrScript.Latin }
+            .map { Pass(it, recognize(client(it), bitmap)) }
+        return (listOf(latin) + others).maxBy { it.reading.letters }
+    }
+
+    private suspend fun recognize(recognizer: TextRecognizer, bitmap: Bitmap): List<OcrBlock> =
+        suspendCancellableCoroutine { cont ->
+            recognizer.process(InputImage.fromBitmap(bitmap, 0))
+                .addOnSuccessListener { text ->
+                    cont.resume(text.textBlocks.mapNotNull { block ->
+                        val lines = block.lines.mapNotNull { line ->
+                            line.boundingBox?.let { OcrLine(line.text, it.left, it.top, it.right, it.bottom, line.confidence, line.angle) }
+                        }
+                        if (lines.isEmpty()) null else OcrBlock(lines)
+                    })
+                }
+                .addOnFailureListener { cont.resume(emptyList()) }
+        }
+
+    /** A copy of [bitmap] with tilted text straightened (or cropped to the text) and contrast raised. */
+    private fun enhanced(bitmap: Bitmap, blocks: List<OcrBlock>): Bitmap {
+        val lines = blocks.flatMap { it.lines }
+        val tilt = lines.map { it.angle }.sorted()[lines.size / 2]
+        var source = bitmap
+        if (abs(tilt) in 2f..30f) {
+            source = rotated(bitmap, -tilt)
+        } else {
+            val left = lines.minOf { it.left }
+            val top = lines.minOf { it.top }
+            val right = lines.maxOf { it.right }
+            val bottom = lines.maxOf { it.bottom }
+            if ((right - left).toLong() * (bottom - top) < 0.7 * bitmap.width * bitmap.height) {
+                val padX = ((right - left) * 0.08f).toInt() + 8
+                val padY = ((bottom - top) * 0.08f).toInt() + 8
+                val x = max(0, left - padX)
+                val y = max(0, top - padY)
+                source = Bitmap.createBitmap(bitmap, x, y, min(bitmap.width - x, right - left + 2 * padX), min(bitmap.height - y, bottom - top + 2 * padY))
+            }
+        }
+        return contrast(source).also { if (source !== bitmap) source.recycle() }
+    }
+
+    private fun rotated(bitmap: Bitmap, degrees: Float): Bitmap {
+        val matrix = Matrix().apply { postRotate(degrees, bitmap.width / 2f, bitmap.height / 2f) }
+        val bounds = RectF(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat()).also { matrix.mapRect(it) }
+        val out = Bitmap.createBitmap(bounds.width().toInt(), bounds.height().toInt(), Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        canvas.drawColor(Color.WHITE)
+        canvas.translate(-bounds.left, -bounds.top)
+        canvas.drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
+        return out
+    }
+
+    private fun contrast(bitmap: Bitmap, factor: Float = 1.4f): Bitmap {
+        val offset = 128f * (1f - factor)
+        val matrix = ColorMatrix().apply {
+            setSaturation(0f)
+            postConcat(ColorMatrix(floatArrayOf(
+                factor, 0f, 0f, 0f, offset,
+                0f, factor, 0f, 0f, offset,
+                0f, 0f, factor, 0f, offset,
+                0f, 0f, 0f, 1f, 0f,
+            )))
+        }
+        val out = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+        Canvas(out).drawBitmap(bitmap, 0f, 0f, Paint().apply { colorFilter = ColorMatrixColorFilter(matrix) })
+        return out
+    }
+
+    /** How sharp [bitmap] is (relative score for picking the best of several photos). */
+    fun sharpness(bitmap: Bitmap): Double {
+        val scale = 640f / max(bitmap.width, bitmap.height)
+        val small = if (scale < 1f) Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true) else bitmap
+        val pixels = IntArray(small.width * small.height)
+        small.getPixels(pixels, 0, small.width, 0, 0, small.width, small.height)
+        val luma = IntArray(pixels.size) { i ->
+            val p = pixels[i]
+            (299 * Color.red(p) + 587 * Color.green(p) + 114 * Color.blue(p)) / 1000
+        }
+        val score = laplacianVariance(luma, small.width, small.height)
+        if (small !== bitmap) small.recycle()
+        return score
+    }
 
     suspend fun detectLanguage(text: String): String? = suspendCancellableCoroutine { cont ->
         languageId.identifyLanguage(text)

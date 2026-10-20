@@ -70,6 +70,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.guidedtour.app.TourViewModel
 import com.guidedtour.app.data.OcrScript
 import com.guidedtour.app.data.PlayerState
+import com.guidedtour.app.data.paragraphsOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -102,7 +103,13 @@ fun Thumbnail(path: String?, modifier: Modifier = Modifier) {
     if (path == null) return
     val bitmap by produceState<ImageBitmap?>(null, path) {
         value = withContext(Dispatchers.IO) {
-            runCatching { BitmapFactory.decodeFile(path)?.asImageBitmap() }.getOrNull()
+            runCatching {
+                // Photos are stored large (for re-reading); decode a smaller copy for the list.
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { BitmapFactory.decodeFile(path, it) }
+                var sample = 1
+                while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 480) sample *= 2
+                BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+            }.getOrNull()
         }
     }
     bitmap?.let {
@@ -219,6 +226,8 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
     val queueNew by settings.queueNewScans.collectAsStateWithLifecycle()
     val volumeShutter by settings.volumeShutter.collectAsStateWithLifecycle()
     val duckMusic by settings.duckMusic.collectAsStateWithLifecycle()
+    val careful by settings.carefulCapture.collectAsStateWithLifecycle()
+    val report by viewModel.accuracyReport.collectAsStateWithLifecycle()
     val script by settings.script.collectAsStateWithLifecycle()
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -263,6 +272,23 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            SwitchRow(
+                "Careful capture",
+                "Takes three photos and reads the sharpest. Slightly slower, usually more accurate.",
+                careful, settings::setCarefulCapture,
+            )
+
+            Text("Developer", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+            Text(
+                "Measure reading accuracy on your own photos. Put name.jpg and name.txt (the true text) pairs in:\n" +
+                    viewModel.accuracyFolder,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            androidx.compose.material3.OutlinedButton(onClick = viewModel::runAccuracyTest) { Text("Run accuracy test") }
+            report?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace))
+            }
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Done") }
         }
     }
@@ -385,4 +411,52 @@ private fun VoiceRow(title: String, detail: String?, selected: Boolean, onSelect
         }
         IconButton(onClick = onPlay) { Icon(Icons.Filled.PlayArrow, "Play a sample of $title") }
     }
+}
+
+/** Pick which paragraphs to keep, e.g. to drop a neighbouring sign that was read along with the plaque. */
+@Composable
+fun ChooseParagraphsDialog(text: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    val paragraphs = remember(text) { paragraphsOf(text) }
+    val keep = remember(text) { androidx.compose.runtime.mutableStateListOf(*Array(paragraphs.size) { true }) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose what to read") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                paragraphs.forEachIndexed { i, paragraph ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable(role = Role.Checkbox) { keep[i] = !keep[i] }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.Checkbox(checked = keep[i], onCheckedChange = null, modifier = Modifier.padding(end = 12.dp))
+                        Text(paragraph, style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(paragraphs.filterIndexed { i, _ -> keep[i] }.joinToString("\n\n")); onDismiss() },
+                enabled = keep.any { it },
+            ) { Text("Keep selected") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** The cloud option uploads the photo, so it always asks first. */
+@Composable
+fun CloudConfirmDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Send this photo to Google?") },
+        text = {
+            Text(
+                "To read it more accurately, the photo of this plaque is uploaded to Google Cloud Vision. " +
+                    "Nothing else is sent, and only for this text."
+            )
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(); onDismiss() }) { Text("Send photo") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

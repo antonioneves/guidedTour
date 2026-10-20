@@ -22,6 +22,15 @@ class ScanQualityTest {
     @Test fun tinyTextIsTooSmall() = assertEquals(Tip.TooSmall, evaluate(frame(line(height = 20)), w, h))
     @Test fun textTouchingEdgeIsCutOff() = assertEquals(Tip.CutOff, evaluate(frame(line(left = 2)), w, h))
     @Test fun lowConfidenceIsUnclear() = assertEquals(Tip.Unclear, evaluate(frame(line(confidence = 0.4f)), w, h))
+    @Test fun movingPhoneIsShakyEvenIfTextLooksGood() =
+        assertEquals(Tip.Shaky, evaluate(frame(line()), w, h, steady = false))
+
+    @Test fun glareIsAWarningButStillOk() {
+        val tip = evaluate(LiveFrame("text", listOf(line()), 150, glare = 0.2f), w, h)
+        assertEquals(Tip.Glare, tip)
+        assertEquals(true, tip.ok)
+    }
+
     @Test fun goodFrameIsOk() {
         val tip = evaluate(frame(line(), line(top = 700)), w, h)
         assertEquals(Tip.Good, tip)

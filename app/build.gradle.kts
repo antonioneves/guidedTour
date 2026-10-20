@@ -16,11 +16,14 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         val localProps = Properties().apply {
             rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
         }
         manifestPlaceholders["MAPS_API_KEY"] = localProps.getProperty("MAPS_API_KEY", "")
+        // Optional: enables the "Improve with cloud" button (uploads the photo to Google Cloud Vision).
+        buildConfigField("String", "VISION_API_KEY", "\"${localProps.getProperty("VISION_API_KEY", "")}\"")
     }
 
     // Release signing: put storeFile/storePassword/keyAlias/keyPassword in keystore.properties
@@ -52,6 +55,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
+        buildConfig = true
         compose = true
     }
 }
@@ -103,6 +107,8 @@ dependencies {
     ksp("androidx.room:room-compiler:$room")
 
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
 
     // Map
     implementation("com.google.maps.android:maps-compose:9.0.1")

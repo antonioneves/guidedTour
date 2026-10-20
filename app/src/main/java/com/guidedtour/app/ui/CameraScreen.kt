@@ -1,6 +1,15 @@
 package com.guidedtour.app.ui
 
 import android.Manifest
+import kotlin.math.sqrt
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.State
+import android.hardware.SensorManager
+import android.hardware.SensorEventListener
+import android.hardware.SensorEvent
+import android.hardware.Sensor
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Matrix
@@ -104,18 +113,57 @@ import com.guidedtour.app.data.cleanOcr
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import com.guidedtour.app.data.PlayerState
+import com.guidedtour.app.data.paragraphsOf
 import com.guidedtour.app.data.Scan
 import com.guidedtour.app.data.Translator
 import java.util.concurrent.Executors
 
 private const val AUTO_CAPTURE_MS = 2500L
 private const val IDLE_RELEASE_MS = 20_000L
+private const val CAREFUL_PHOTOS = 3
+
+/** Takes one photo; null if the camera failed. The caller owns (and must close) the image. */
+private suspend fun takePhoto(controller: LifecycleCameraController, executor: java.util.concurrent.Executor): ImageProxy? =
+    suspendCancellableCoroutine { cont ->
+        controller.takePicture(executor, object : ImageCapture.OnImageCapturedCallback() {
+            override fun onCaptureSuccess(image: ImageProxy) = cont.resume(image) { image.close() }
+            override fun onError(exception: ImageCaptureException) = cont.resume(null) {}
+        })
+    }
+
+/** True while the phone is held still (low gyroscope rotation); always true without a gyroscope. */
+@Composable
+private fun rememberSteady(active: Boolean): State<Boolean> {
+    val context = LocalContext.current
+    val steady = remember { mutableStateOf(true) }
+    DisposableEffect(active) {
+        val manager = context.getSystemService(SensorManager::class.java)
+        val gyroscope = manager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+        if (!active || gyroscope == null) {
+            steady.value = true
+            return@DisposableEffect onDispose {}
+        }
+        var smoothed = 0f
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                val rotation = sqrt(event.values[0] * event.values[0] + event.values[1] * event.values[1] + event.values[2] * event.values[2])
+                smoothed = 0.8f * smoothed + 0.2f * rotation
+                // Hysteresis so the tip doesn't flicker: calm below 0.2 rad/s, moving above 0.3.
+                steady.value = if (steady.value) smoothed < 0.3f else smoothed < 0.2f
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+        manager.registerListener(listener, gyroscope, SensorManager.SENSOR_DELAY_UI)
+        onDispose { manager.unregisterListener(listener) }
+    }
+    return steady
+}
 private val EMPTY_FRAME = LiveFrame("", emptyList(), 255)
 
 /** Wraps MlKitAnalyzer so we can also measure frame brightness before it is consumed. */
 private class BrightnessAwareAnalyzer(
     private val delegate: MlKitAnalyzer,
-    private val onBrightness: (Int) -> Unit,
+    private val onStats: (brightness: Int, glare: Float) -> Unit,
 ) : ImageAnalysis.Analyzer {
     override fun getTargetCoordinateSystem() = delegate.targetCoordinateSystem
     override fun updateTransform(matrix: Matrix?) = delegate.updateTransform(matrix)
@@ -126,13 +174,16 @@ private class BrightnessAwareAnalyzer(
         val buffer = plane.buffer
         var sum = 0L
         var count = 0
+        var glaring = 0
         for (y in 0 until image.height step 16) {
             for (x in 0 until image.width step 16) {
-                sum += buffer.get(y * plane.rowStride + x * plane.pixelStride).toInt() and 0xFF
+                val luma = buffer.get(y * plane.rowStride + x * plane.pixelStride).toInt() and 0xFF
+                sum += luma
+                if (luma >= 250) glaring++
                 count++
             }
         }
-        onBrightness(if (count == 0) 255 else (sum / count).toInt())
+        onStats(if (count == 0) 255 else (sum / count).toInt(), if (count == 0) 0f else glaring.toFloat() / count)
         delegate.analyze(image)
     }
 }
@@ -147,6 +198,8 @@ private fun Tip.icon(): ImageVector = when (this) {
     Tip.TooSmall -> Icons.Outlined.ZoomIn
     Tip.CutOff -> Icons.Outlined.CropFree
     Tip.Unclear -> Icons.Outlined.BlurOn
+    Tip.Shaky -> Icons.Outlined.BlurOn
+    Tip.Glare -> Icons.Outlined.LightMode
     Tip.Good -> Icons.Filled.CheckCircle
 }
 
@@ -199,10 +252,13 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
     val state by viewModel.state.collectAsStateWithLifecycle()
     val player by viewModel.player.collectAsStateWithLifecycle()
     val script by viewModel.settings.script.collectAsStateWithLifecycle()
+    val careful by viewModel.settings.carefulCapture.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
 
     var frame by remember { mutableStateOf(EMPTY_FRAME) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
-    val tip = evaluate(frame, viewSize.width, viewSize.height)
+    val steady by rememberSteady(active = visible)
+    val tip = evaluate(frame, viewSize.width, viewSize.height, steady)
     var autoCapture by remember { mutableStateOf(true) }
     var armed by remember { mutableStateOf(true) }
     val countdown = remember { Animatable(0f) }
@@ -213,6 +269,8 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
         LifecycleCameraController(context).apply {
             setEnabledUseCases(CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE)
             imageCaptureMode = ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY
+            isTapToFocusEnabled = true
+            isPinchToZoomEnabled = true
         }
     }
     DisposableEffect(Unit) { onDispose { analysisExecutor.shutdown() } }
@@ -224,6 +282,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
         }
         val recognizer = Recognizer.client(script)
         var brightness = 255
+        var glare = 0f
         val mlKit = MlKitAnalyzer(
             listOf(recognizer),
             ImageAnalysis.COORDINATE_SYSTEM_VIEW_REFERENCED,
@@ -231,15 +290,15 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
         ) { result ->
             val text = result.getValue(recognizer)
             frame = if (text == null) {
-                LiveFrame("", emptyList(), brightness)
+                LiveFrame("", emptyList(), brightness, glare)
             } else {
                 val lines = text.textBlocks.flatMap { it.lines }.mapNotNull { line ->
                     line.boundingBox?.let { LineBox(it.left, it.top, it.right, it.bottom, line.confidence) }
                 }
-                LiveFrame(cleanOcr(text.text), lines, brightness)
+                LiveFrame(cleanOcr(text.text), lines, brightness, glare)
             }
         }
-        controller.setImageAnalysisAnalyzer(analysisExecutor, BrightnessAwareAnalyzer(mlKit) { brightness = it })
+        controller.setImageAnalysisAnalyzer(analysisExecutor, BrightnessAwareAnalyzer(mlKit) { b, g -> brightness = b; glare = g })
         onDispose { controller.clearImageAnalysisAnalyzer() }
     }
     // Stay bound for a quick return, but release the camera if the tab is left for a while.
@@ -253,17 +312,19 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
     }
 
     fun capture() {
-        if (!visible || state == ScanState.Processing) return
+        if (!visible || !viewModel.beginCapture()) return
         armed = false
         viewModel.dismissResult()
         val liveText = frame.text
-        controller.takePicture(
-            ContextCompat.getMainExecutor(context),
-            object : ImageCapture.OnImageCapturedCallback() {
-                override fun onCaptureSuccess(image: ImageProxy) = viewModel.onPhotoCaptured(image, liveText)
-                override fun onError(exception: ImageCaptureException) = viewModel.onCaptureFailed(liveText)
-            },
-        )
+        val photos = if (careful) CAREFUL_PHOTOS else 1
+        scope.launch {
+            // Take a few photos in a row; the view model keeps the sharpest and reads it.
+            repeat(photos) {
+                val image = takePhoto(controller, ContextCompat.getMainExecutor(context))
+                if (image != null) viewModel.addFrame(image)
+            }
+            viewModel.finishCapture(liveText)
+        }
     }
 
     // Re-arm once the text has left the frame, so a finished scan isn't repeated.
@@ -410,6 +471,9 @@ private fun Shutter(progress: Float, onClick: () -> Unit) {
 private fun ResultSheet(scan: Scan, player: PlayerState, viewModel: TourViewModel, onDismiss: () -> Unit) {
     val translating by viewModel.translating.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf(false) }
+    var choosing by remember { mutableStateOf(false) }
+    var confirmCloud by remember { mutableStateOf(false) }
+    val cloudReading by viewModel.cloudReading.collectAsStateWithLifecycle()
     val current = player.current?.takeIf { it.id == scan.id && !it.translated }
     val queuedAt = player.queue.indexOfFirst { it.id == scan.id && !it.translated }
     val waiting = queuedAt > player.index
@@ -465,6 +529,14 @@ private fun ResultSheet(scan: Scan, player: PlayerState, viewModel: TourViewMode
                     Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                     Text("Fix text")
                 }
+                if (paragraphsOf(scan.text).size > 1) {
+                    TextButton(onClick = { choosing = true }) { Text("Choose paragraphs") }
+                }
+                if (viewModel.cloudAvailable && scan.thumbnail != null) {
+                    TextButton(onClick = { confirmCloud = true }, enabled = scan.id !in cloudReading) {
+                        Text(if (scan.id in cloudReading) "Reading…" else "Improve with cloud")
+                    }
+                }
                 if (Translator.needsTranslation(scan.languageTag)) {
                     TextButton(onClick = { viewModel.translate(scan) }, enabled = scan.id !in translating) {
                         Icon(Icons.Filled.Translate, null, Modifier.size(ButtonDefaults.IconSize))
@@ -476,4 +548,6 @@ private fun ResultSheet(scan: Scan, player: PlayerState, viewModel: TourViewMode
         }
     }
     if (editing) EditTextDialog(scan.text, onDismiss = { editing = false }) { viewModel.editText(scan, it) }
+    if (choosing) ChooseParagraphsDialog(scan.text, onDismiss = { choosing = false }) { viewModel.editText(scan, it) }
+    if (confirmCloud) CloudConfirmDialog(onDismiss = { confirmCloud = false }) { viewModel.improveWithCloud(scan) }
 }
