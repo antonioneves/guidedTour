@@ -72,7 +72,8 @@ fun TourApp(viewModel: TourViewModel) {
                 Manifest.permission.CAMERA,
                 Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.ACCESS_COARSE_LOCATION,
-                Manifest.permission.POST_NOTIFICATIONS,
+                // No notification permission: the "Reading aloud" player is a media notification,
+                // which Android shows without it.
             )
         )
     }
