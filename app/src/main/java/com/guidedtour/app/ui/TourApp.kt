@@ -10,17 +10,20 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -42,8 +45,11 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.guidedtour.app.R
 import com.guidedtour.app.ScanState
@@ -93,6 +99,9 @@ fun TourApp(viewModel: TourViewModel) {
     val scanState by viewModel.state.collectAsStateWithLifecycle()
     val guidesBounce = remember { Animatable(1f) }
     val flight = remember { CaptureFlight() }
+    val showPlayer = player.active && selected == Tab.Guides
+    var playerHeight by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     fun openGuides(bounce: Boolean) {
         selected = Tab.Guides
@@ -141,13 +150,18 @@ fun TourApp(viewModel: TourViewModel) {
                 when (selected) {
                     Tab.Scan -> Unit
                     Tab.Places -> Surface(Modifier.fillMaxSize()) { MapScreen(viewModel) }
-                    Tab.Guides -> Surface(Modifier.fillMaxSize()) { TextsScreen(viewModel, onOpenSettings = { showSettings = true }) }
+                    Tab.Guides -> Surface(Modifier.fillMaxSize()) {
+                        TextsScreen(viewModel, bottomInset = if (showPlayer) playerHeight else 0.dp, onOpenSettings = { showSettings = true })
+                    }
                 }
-                SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
-            }
-            // Solid behind the floating player, or the camera preview would show through its margins.
-            AnimatedVisibility(player.active, modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
-                NowPlayingBar(player, viewModel, onOpenQueue = { showQueue = true })
+                // The player floats over the Guides list only, which shows around it.
+                FloatingPlayer(
+                    showPlayer,
+                    Modifier.align(Alignment.BottomCenter).onSizeChanged { playerHeight = with(density) { it.height.toDp() } },
+                ) {
+                    NowPlayingBar(player, viewModel, onOpenQueue = { showQueue = true })
+                }
+                SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (showPlayer) playerHeight else 0.dp))
             }
         }
     }
@@ -157,3 +171,12 @@ fun TourApp(viewModel: TourViewModel) {
     if (showQueue) QueueSheet(viewModel, onDismiss = { showQueue = false })
     if (showSettings) SettingsSheet(viewModel, onDismiss = { showSettings = false })
 }
+
+/** Slides the player in and out at the bottom of the screen. */
+@Composable
+private fun FloatingPlayer(visible: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
+    AnimatedVisibility(visible, modifier, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+        content()
+    }
+}
+

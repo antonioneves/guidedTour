@@ -21,15 +21,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +63,8 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.guidedtour.app.TourViewModel
+import com.guidedtour.app.data.Place
+import com.guidedtour.app.data.PlayerState
 import com.guidedtour.app.data.Scan
 import com.guidedtour.app.data.dailyRoutes
 import com.guidedtour.app.data.groupPlaces
@@ -101,6 +105,7 @@ private fun pinImage(count: Int) = if (count == 1) "pin" else "pin-$count"
 @Composable
 fun MapScreen(viewModel: TourViewModel) {
     val scans by viewModel.scans.collectAsStateWithLifecycle()
+    val player by viewModel.player.collectAsStateWithLifecycle()
     val located = scans.filter { it.latitude != null && it.longitude != null }
     val scope = rememberCoroutineScope()
     val sheetState = rememberBottomSheetScaffoldState()
@@ -112,15 +117,18 @@ fun MapScreen(viewModel: TourViewModel) {
     }
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
-    // The scans behind the tapped pin (one, or several taken close together), oldest first.
-    var selected by remember { mutableStateOf<List<Scan>>(emptyList()) }
+    // The place whose pin was tapped (by its first scan's id): its row is scrolled to and highlighted.
+    var selected by remember { mutableStateOf<Long?>(null) }
+    val listState = rememberLazyListState()
     val dark = isSystemInDarkTheme()
     val routeColor = MaterialTheme.colorScheme.primary.toArgb()
     val bottomPadding = with(LocalDensity.current) { PeekHeight.toPx().toDouble() }
     // Scans taken close together share one pin; a day's route shows only for a real walk.
     val places = remember(located) { groupPlaces(located) }
     val routes = remember(places) { dailyRoutes(places).map { route -> route.map { Point.fromLngLat(it.longitude, it.latitude) } } }
+    val listed = remember(places) { places.sortedByDescending { it.scans.last().timestamp } }
     val currentPlaces by rememberUpdatedState(places)
+    val currentListed by rememberUpdatedState(listed)
 
     // Load the light or dark style, then add the route and pin layers on top of it.
     LaunchedEffect(map, dark) {
@@ -207,31 +215,33 @@ fun MapScreen(viewModel: TourViewModel) {
                     modifier = Modifier.padding(24.dp),
                 )
             } else {
-                LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp)) {
-                    items(located, key = { it.id }) { scan ->
-                        ListItem(
-                            modifier = Modifier.clickable {
+                // One row per place (like the pins), most recent first. Tapping a row moves the map
+                // there; its button plays the place's texts and shows whether they are playing.
+                // Space below the last row lets any row scroll to the top of the lowered sheet when its pin is tapped.
+                val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+                LazyColumn(Modifier.fillMaxWidth(), state = listState, contentPadding = PaddingValues(bottom = screenHeight)) {
+                    items(listed, key = { it.scans.first().id }) { place ->
+                        PlaceRow(
+                            place,
+                            player,
+                            highlighted = place.scans.first().id == selected,
+                            onClick = {
                                 scope.launch {
                                     sheetState.bottomSheetState.partialExpand()
-                                    selected = listOf(scan)
+                                    selected = null
                                     map?.animateCamera(
-                                        CameraUpdateFactory.newCameraPosition(
-                                            cameraAt(LatLng(scan.latitude!!, scan.longitude!!), 18.0, bottomPadding),
-                                        ),
+                                        CameraUpdateFactory.newCameraPosition(cameraAt(LatLng(place.latitude, place.longitude), 18.0, bottomPadding)),
                                     )
                                 }
                             },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            leadingContent = {
-                                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(40.dp)) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(Icons.Filled.Place, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                                    }
+                            onPlay = {
+                                val ids = place.scans.map { it.id }.toSet()
+                                when {
+                                    player.current?.id in ids -> viewModel.togglePlayback()
+                                    place.scans.size == 1 -> viewModel.playNow(place.scans[0])
+                                    else -> viewModel.playAll(place.scans)
                                 }
                             },
-                            headlineContent = { Text(scan.placeLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            supportingContent = { Text(scan.text, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                            trailingContent = { Text(scan.timeLabel(), style = MaterialTheme.typography.labelMedium) },
                         )
                     }
                 }
@@ -246,8 +256,12 @@ fun MapScreen(viewModel: TourViewModel) {
                     m.addOnMapClickListener { point ->
                         val screen = m.projection.toScreenLocation(point)
                         val index = m.queryRenderedFeatures(screen, PINS).firstOrNull()?.getNumberProperty(PLACE_INDEX)?.toInt()
-                        selected = index?.let { currentPlaces.getOrNull(it)?.scans }.orEmpty()
-                        index != null
+                        val key = index?.let { currentPlaces.getOrNull(it) }?.scans?.first()?.id
+                        selected = key
+                        // Bring the tapped place's row into view in the list below.
+                        val row = currentListed.indexOfFirst { it.scans.first().id == key }
+                        if (row >= 0) scope.launch { listState.animateScrollToItem(row) }
+                        key != null
                     }
                     map = m
                 },
@@ -273,44 +287,59 @@ fun MapScreen(viewModel: TourViewModel) {
                         Text("You're offline – only places you've already viewed will show.", Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
                     }
                 }
-                if (selected.isNotEmpty()) {
-                    val group = selected
-                    SelectedPlace(
-                        group,
-                        onPlay = { if (group.size == 1) viewModel.playNow(group[0]) else viewModel.playAll(group) },
-                        onClose = { selected = emptyList() },
-                    )
-                }
             }
         }
     }
 }
 
-/** A card for the tapped pin: its place and text, or how many texts it holds. Play reads them all, oldest first. */
 @Composable
-private fun SelectedPlace(scans: List<Scan>, onPlay: () -> Unit, onClose: () -> Unit) {
-    val scan = scans.first()
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shadowElevation = 4.dp,
-    ) {
-        Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(scan.placeLabel(), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    if (scans.size == 1) scan.text else "${scans.size} texts",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+private fun PlaceRow(place: Place, player: PlayerState, highlighted: Boolean, onClick: () -> Unit, onPlay: () -> Unit) {
+    val first = place.scans.first()
+    val active = player.current?.id in place.scans.map { it.id }
+    val playing = active && player.playing
+    ListItem(
+        modifier = Modifier.clickable(onClickLabel = "Show on the map", onClick = onClick),
+        colors = ListItemDefaults.colors(
+            containerColor = when {
+                active -> MaterialTheme.colorScheme.primaryContainer
+                highlighted -> MaterialTheme.colorScheme.secondaryContainer
+                else -> Color.Transparent
+            },
+        ),
+        leadingContent = {
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(40.dp)) {
+                Box(contentAlignment = Alignment.Center) {
+                    if (place.scans.size > 1) {
+                        Text("${place.scans.size}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    } else {
+                        Icon(Icons.Filled.Place, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                }
             }
-            IconButton(onClick = onPlay) { Icon(Icons.Filled.PlayArrow, if (scans.size == 1) "Read aloud" else "Read all aloud") }
-            IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close") }
-        }
-    }
+        },
+        headlineContent = { Text(first.placeLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        supportingContent = {
+            Text(
+                if (place.scans.size == 1) first.text else "${place.scans.size} texts · ${place.scans.last().timeLabel()}",
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (place.scans.size == 1) Text(first.timeLabel(), style = MaterialTheme.typography.labelMedium)
+                val description = when {
+                    playing -> "Pause"
+                    active -> "Resume"
+                    place.scans.size == 1 -> "Read aloud"
+                    else -> "Read all aloud"
+                }
+                FilledTonalIconButton(onClick = onPlay) {
+                    Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, description)
+                }
+            }
+        },
+    )
 }
 
 /** MapLibre's MapView, following the screen's lifecycle. */

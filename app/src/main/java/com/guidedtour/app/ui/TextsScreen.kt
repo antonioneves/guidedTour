@@ -85,6 +85,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.guidedtour.app.ScanState
@@ -102,7 +103,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun TextsScreen(viewModel: TourViewModel, onOpenSettings: () -> Unit) {
+fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings: () -> Unit) {
     val scans by viewModel.scans.collectAsStateWithLifecycle()
     val player by viewModel.player.collectAsStateWithLifecycle()
     val translating by viewModel.translating.collectAsStateWithLifecycle()
@@ -172,7 +173,7 @@ fun TextsScreen(viewModel: TourViewModel, onOpenSettings: () -> Unit) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { SnackbarHost(snackbar, Modifier.padding(bottom = bottomInset)) },
     ) { padding ->
         if (scans.isEmpty() && !processing) {
             EmptyState(Modifier.padding(padding))
@@ -181,7 +182,8 @@ fun TextsScreen(viewModel: TourViewModel, onOpenSettings: () -> Unit) {
                 Modifier.fillMaxSize(),
                 state = listState,
                 contentPadding = PaddingValues(
-                    start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 8.dp, bottom = 24.dp,
+                    // Room for the floating player, so the last card can scroll clear of it.
+                    start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 8.dp, bottom = 24.dp + bottomInset,
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
