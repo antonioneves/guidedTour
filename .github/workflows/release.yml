@@ -1,0 +1,83 @@
+# Builds the signed release APK and app bundle.
+#
+# Runs only when started by hand (Actions → Release APK → Run workflow) or when a version tag such
+# as v1.0 is pushed, so it doesn't use build minutes on every commit. A tag also publishes a GitHub
+# release with the APK attached.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   RELEASE_KEYSTORE_BASE64  release.jks encoded with: base64 -i release.jks | pbcopy
+#   RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD  values from keystore.properties
+#   MAPS_API_KEY             optional
+# Without the keystore secrets the APK is built unsigned.
+name: Release APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Write signing config and keys
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > release.jks
+            printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
+          else
+            echo "::warning::No signing secrets set; building an unsigned APK."
+          fi
+          printf 'MAPS_API_KEY=%s\n' "$MAPS_API_KEY" > local.properties
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest
+
+      - name: Build release APK and bundle
+        run: ./gradlew :app:assembleRelease :app:bundleRelease
+
+      - name: Remove signing files
+        if: always()
+        run: rm -f release.jks keystore.properties local.properties
+
+      # Artifacts count against the 500 MB storage of the free plan, so keep them briefly.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: guided-tour-${{ github.ref_name }}
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/bundle/release/*.aab
+          retention-days: 7
+
+      # Release files don't count against artifact storage.
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" app/build/outputs/apk/release/*.apk \
+            --title "Guided Tour $GITHUB_REF_NAME" --generate-notes

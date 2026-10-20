@@ -64,6 +64,15 @@ keyPassword=...
 Keep a backup of `release.jks` and its passwords: Google Play updates must be signed with the same
 key. Without the file, release builds are left unsigned.
 
+### GitHub Actions
+
+`.github/workflows/release.yml` builds the signed APK and bundle on GitHub. Start it by hand
+(Actions → Release APK → Run workflow) or push a version tag (`git tag v1.0 && git push --tags`),
+which also publishes a GitHub release with the APK. It needs these repository secrets:
+`RELEASE_KEYSTORE_BASE64` (`base64 -i release.jks`), `RELEASE_STORE_PASSWORD`,
+`RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD` and optionally `MAPS_API_KEY`. Raise `versionCode` in
+`app/build.gradle.kts` before each release that will be installed over an earlier one.
+
 ### Baseline profile
 
 `baselineprofile/` records startup and tab navigation so that code is compiled ahead of time on
