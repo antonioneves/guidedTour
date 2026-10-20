@@ -319,7 +319,7 @@ private fun PlaceRow(place: Place, player: PlayerState, highlighted: Boolean, on
                 }
             }
             Text(
-                place.scans.last().timeLabel(),
+                place.scans.last().shortTimeLabel(),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
