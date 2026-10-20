@@ -3,7 +3,6 @@ package com.guidedtour.app.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.Configuration
 import android.graphics.Matrix
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -77,6 +76,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -92,7 +92,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -232,7 +231,7 @@ private fun hasCameraPermission(context: android.content.Context) =
     ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
 @Composable
-fun CameraScreen(viewModel: TourViewModel, visible: Boolean, flight: CaptureFlight, onOpenSettings: () -> Unit, onDropped: () -> Unit) {
+fun CameraScreen(viewModel: TourViewModel, visible: Boolean, uprightTurns: Int, flight: CaptureFlight, onOpenSettings: () -> Unit, onDropped: () -> Unit) {
     val context = LocalContext.current
     var hasCamera by remember { mutableStateOf(hasCameraPermission(context)) }
     // Re-check on resume so granting the permission dialog takes effect immediately.
@@ -240,7 +239,7 @@ fun CameraScreen(viewModel: TourViewModel, visible: Boolean, flight: CaptureFlig
         hasCamera = hasCameraPermission(context)
         onPauseOrDispose {}
     }
-    if (hasCamera) CameraContent(viewModel, visible, flight, onOpenSettings, onDropped) else CameraPermissionNeeded()
+    if (hasCamera) CameraContent(viewModel, visible, uprightTurns, flight, onOpenSettings, onDropped) else CameraPermissionNeeded()
 }
 
 @Composable
@@ -271,7 +270,7 @@ private fun CameraPermissionNeeded() {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun CameraContent(viewModel: TourViewModel, visible: Boolean, flight: CaptureFlight, onOpenSettings: () -> Unit, onDropped: () -> Unit) {
+private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTurns: Int, flight: CaptureFlight, onOpenSettings: () -> Unit, onDropped: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -457,8 +456,16 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, flight: Ca
             }
         }
 
+        // The tips sit at whichever edge is "up" for the person holding the phone, turned to read upright.
+        val iconAngle = animatedUprightAngle(uprightTurns)
+        val tipsAlignment = when (uprightTurns) {
+            // Turned left, the screen's right edge points up; turned right, its left edge does.
+            1 -> Alignment.CenterEnd
+            -1 -> Alignment.CenterStart
+            else -> Alignment.TopCenter
+        }
         Column(
-            Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(16.dp),
+            Modifier.align(tipsAlignment).then(if (uprightTurns == 0) Modifier.statusBarsPadding() else Modifier).rotateLayout(uprightTurns).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -489,20 +496,18 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, flight: Ca
             onClick = onOpenSettings,
             modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp),
             colors = IconButtonDefaults.iconButtonColors(containerColor = Color.Black.copy(alpha = 0.45f), contentColor = Color.White),
-        ) { Icon(Icons.Filled.Settings, "Settings") }
+        ) { Icon(Icons.Filled.Settings, "Settings", Modifier.rotate(iconAngle)) }
 
-        // Like a camera app: the shutter sits at the bottom in portrait and at the side in landscape.
-        val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (landscape) 16.dp else 140.dp))
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp))
         if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
 
-        Box(if (landscape) Modifier.align(Alignment.CenterEnd).padding(end = 28.dp) else Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp)) {
+        Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp)) {
             if (state == ScanState.Processing) {
                 Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.size(92.dp)) {
                     Box(contentAlignment = Alignment.Center) { LoadingIndicator() }
                 }
             } else {
-                Shutter(progress = countdown.value, onClick = ::capture)
+                Shutter(progress = countdown.value, iconAngle = iconAngle, onClick = ::capture)
             }
         }
     }
@@ -563,7 +568,7 @@ private fun StatusPill(icon: ImageVector, message: String, highlight: Boolean = 
 
 /** Shutter with a ring that fills while the automatic capture countdown runs. */
 @Composable
-private fun Shutter(progress: Float, onClick: () -> Unit) {
+private fun Shutter(progress: Float, iconAngle: Float, onClick: () -> Unit) {
     Box(Modifier.size(92.dp), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(
             progress = { progress },
@@ -576,7 +581,7 @@ private fun Shutter(progress: Float, onClick: () -> Unit) {
         )
         Surface(onClick = onClick, shape = CircleShape, color = Color.White, modifier = Modifier.size(70.dp)) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.CameraAlt, "Take photo and read text", tint = Color(0xFF202020), modifier = Modifier.size(30.dp))
+                Icon(Icons.Filled.CameraAlt, "Take photo and read text", tint = Color(0xFF202020), modifier = Modifier.size(30.dp).rotate(iconAngle))
             }
         }
     }
