@@ -35,6 +35,7 @@ TITLE = "THE ACROPOLIS OF ATHENS"
 COL1 = ["The citadel rose above the city", "and was a place of worship", "for more than a thousand years."]
 COL2 = ["Pericles led the great building", "programme that created the", "temples seen here today."]
 CREDIT = "Photo credit: Hellenic Ministry of Culture"
+NEIGHBOUR = ["Roman Athens", "Under Hadrian", "the city grew", "a new quarter", "with baths and", "a library."]
 
 
 def canvas(size=(1600, 1200), color=(205, 198, 182)):
@@ -84,6 +85,14 @@ def main(out):
     draw_lines(img, COL2, (860, 300), 44)
     draw_lines(img, [CREDIT], (130, 1050), 24)
     cases["two_columns"] = (img, " ".join([TITLE] + COL1 + COL2))
+
+    # The plaque in the middle, with part of the next plaque cut off at the right edge.
+    img = canvas(color=(120, 110, 100))
+    ImageDraw.Draw(img).rectangle((60, 220, 1240, 760), fill=(205, 198, 182))
+    draw_lines(img, PARAGRAPH, (100, 270), 42)
+    ImageDraw.Draw(img).rectangle((1420, 160, 1700, 900), fill=(205, 198, 182))
+    draw_lines(img, NEIGHBOUR, (1450, 220), 42)
+    cases["side_text"] = (img, truth)
 
     for name, (image, text) in cases.items():
         image.save(out / f"{name}.jpg", quality=88)

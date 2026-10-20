@@ -89,6 +89,47 @@ private fun orderColumns(blocks: List<OcrBlock>): List<OcrBlock> {
     return columns.sortedBy { col -> col.minOf { it.left } }.flatMap { col -> col.sortedBy { it.top } }
 }
 
+/**
+ * Keeps the text the camera was aimed at and drops pieces of neighbouring plaques. Blocks that lie
+ * close together (gaps of a few line heights) form one group; each group scores its amount of text,
+ * less if it is far from the middle of the photo or cut off at its left or right edge. Groups
+ * scoring under half the best are dropped. [width] and [height] are the photo's size.
+ */
+fun dropIntruders(blocks: List<OcrBlock>, width: Int, height: Int): List<OcrBlock> {
+    if (blocks.size < 2 || width <= 0 || height <= 0) return blocks
+    val groups = groupsOf(blocks)
+    if (groups.size < 2) return blocks
+    val scores = groups.map { groupScore(it, width, height) }
+    val best = scores.max()
+    return groups.filterIndexed { i, _ -> scores[i] >= best * 0.5 }.flatten().sortedBy { blocks.indexOf(it) }
+}
+
+private fun groupsOf(blocks: List<OcrBlock>): List<List<OcrBlock>> {
+    val parent = IntArray(blocks.size) { it }
+    fun root(i: Int): Int = if (parent[i] == i) i else root(parent[i]).also { parent[i] = it }
+    for (i in blocks.indices) for (j in i + 1 until blocks.size) {
+        if (near(blocks[i], blocks[j])) parent[root(i)] = root(j)
+    }
+    return blocks.indices.groupBy(::root).values.map { group -> group.map { blocks[it] } }
+}
+
+private fun near(a: OcrBlock, b: OcrBlock): Boolean {
+    val line = max(a.medianLineHeight, b.medianLineHeight)
+    val dx = max(0, max(a.left, b.left) - min(a.right, b.right))
+    val dy = max(0, max(a.top, b.top) - min(a.bottom, b.bottom))
+    return dx <= 2.5 * line && dy <= 3 * line
+}
+
+private fun groupScore(group: List<OcrBlock>, width: Int, height: Int): Double {
+    val chars = group.sumOf { it.text.length }.toDouble()
+    val cx = group.sumOf { (it.left + it.right) / 2.0 * it.text.length } / chars
+    val cy = group.sumOf { (it.top + it.bottom) / 2.0 * it.text.length } / chars
+    val distance = kotlin.math.hypot(cx - width / 2.0, cy - height / 2.0) / (0.5 * kotlin.math.hypot(width.toDouble(), height.toDouble()))
+    val margin = width * 0.015
+    val cutOff = group.all { it.left <= margin || it.right >= width - margin }
+    return chars * (1 - 0.6 * min(1.0, distance)) * (if (cutOff) 0.5 else 1.0)
+}
+
 /** Drops small captions, credits and page numbers when there is clearly bigger main text. */
 fun dropNoise(blocks: List<OcrBlock>): List<OcrBlock> {
     if (blocks.size < 2) return blocks
@@ -110,9 +151,12 @@ fun fixConfusables(text: String): String {
         .replace(Regex("""(?<=\p{Ll})[1|](?=\p{Ll})"""), "l")
 }
 
-/** Ordered, de-noised text with one blank line between paragraphs. */
-fun layoutText(blocks: List<OcrBlock>): String =
-    orderBlocks(dropNoise(blocks))
+/**
+ * Ordered, de-noised text with one blank line between paragraphs. With the photo's [width] and
+ * [height], text from neighbouring plaques is dropped too.
+ */
+fun layoutText(blocks: List<OcrBlock>, width: Int = 0, height: Int = 0): String =
+    orderBlocks(dropNoise(dropIntruders(blocks, width, height)))
         .map { fixConfusables(it.text) }
         .filter { it.isNotBlank() }
         .joinToString("\n\n")

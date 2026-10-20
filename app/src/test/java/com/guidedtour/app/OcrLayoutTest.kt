@@ -4,6 +4,7 @@ import com.guidedtour.app.data.OcrBlock
 import com.guidedtour.app.data.OcrLine
 import com.guidedtour.app.data.characterErrorRate
 import com.guidedtour.app.data.cleanOcr
+import com.guidedtour.app.data.dropIntruders
 import com.guidedtour.app.data.dropNoise
 import com.guidedtour.app.data.fixConfusables
 import com.guidedtour.app.data.joinLines
@@ -53,6 +54,32 @@ class OcrLayoutTest {
         val credit = block("Photo: someone", 0, 400, height = 20)
         val page = block("12", 800, 900, height = 60)
         assertEquals(listOf(main), dropNoise(listOf(main, credit, page)))
+    }
+
+    // A 2000 x 1500 photo with the plaque in the middle.
+    private val body = listOf(
+        block("The Parthenon was built between 447 and 432 BC", 500, 500, width = 1000),
+        block("as a temple dedicated to the goddess Athena.", 500, 560, width = 1000),
+        block("Its marble sculptures are among the finest works.", 500, 620, width = 1000),
+    )
+
+    @Test fun textFromANeighbouringPlaqueIsDropped() {
+        val side = block("of the Roman", 1850, 540, width = 150)
+        assertEquals(body, dropIntruders(body + side, 2000, 1500))
+        assertTrue("Roman" !in layoutText(body + side, 2000, 1500))
+    }
+
+    @Test fun columnsAndHeadingOfOnePlaqueAreKept() {
+        val heading = block("THE ACROPOLIS", 500, 380, width = 700, height = 80)
+        val left = block("The citadel rose above the city", 300, 500, width = 600)
+        val right = block("Pericles led the great building", 1000, 500, width = 600)
+        val all = listOf(heading, left, right)
+        assertEquals(all, dropIntruders(all, 2000, 1500))
+    }
+
+    @Test fun withoutThePhotoSizeNothingIsDropped() {
+        val side = block("of the Roman", 1850, 540, width = 150)
+        assertEquals(body + side, dropIntruders(body + side, 0, 0))
     }
 
     @Test fun lonelyBlockIsNeverDropped() {

@@ -31,11 +31,13 @@ class Reading(val text: String, val confidence: Float, val letters: Int) {
     val isEmpty: Boolean get() = text.isBlank()
 }
 
-private class Pass(val script: OcrScript, val blocks: List<OcrBlock>) {
+private class Pass(val script: OcrScript, val blocks: List<OcrBlock>, val width: Int, val height: Int) {
+    /** The blocks that belong to the aimed-at text, without neighbouring plaques. */
+    val kept: List<OcrBlock> get() = dropIntruders(blocks, width, height)
     val reading: Reading
         get() {
-            val text = layoutText(blocks)
-            return Reading(text, meanConfidence(blocks), text.count { it.isLetterOrDigit() })
+            val text = layoutText(blocks, width, height)
+            return Reading(text, meanConfidence(kept), text.count { it.isLetterOrDigit() })
         }
 }
 
@@ -81,8 +83,9 @@ object Recognizer {
         val first = firstPass(bitmap, script)
         var best = first.reading
         if (enhance && first.blocks.isNotEmpty()) {
-            val improved = withContext(Dispatchers.Default) { enhanced(bitmap, first.blocks) }
-            val second = Pass(first.script, recognize(client(first.script), improved)).reading
+            // Straighten or crop around the kept text only, so neighbouring plaques fall outside.
+            val improved = withContext(Dispatchers.Default) { enhanced(bitmap, first.kept) }
+            val second = Pass(first.script, recognize(client(first.script), improved), improved.width, improved.height).reading
             improved.recycle()
             if (isBetter(second, best)) best = second
         }
@@ -94,14 +97,17 @@ object Recognizer {
             (candidate.letters > current.letters * 1.1 && candidate.confidence >= current.confidence * 0.95)
 
     private suspend fun firstPass(bitmap: Bitmap, script: OcrScript): Pass {
-        if (script != OcrScript.Auto) return Pass(script, recognize(client(script), bitmap))
+        if (script != OcrScript.Auto) return pass(script, bitmap)
         // Latin first; only if it finds next to nothing do we try the other scripts.
-        val latin = Pass(OcrScript.Latin, recognize(client(OcrScript.Latin), bitmap))
+        val latin = pass(OcrScript.Latin, bitmap)
         if (latin.reading.letters >= 12) return latin
         val others = OcrScript.entries.filter { it != OcrScript.Auto && it != OcrScript.Latin }
-            .map { Pass(it, recognize(client(it), bitmap)) }
+            .map { pass(it, bitmap) }
         return (listOf(latin) + others).maxBy { it.reading.letters }
     }
+
+    private suspend fun pass(script: OcrScript, bitmap: Bitmap) =
+        Pass(script, recognize(client(script), bitmap), bitmap.width, bitmap.height)
 
     private suspend fun recognize(recognizer: TextRecognizer, bitmap: Bitmap): List<OcrBlock> =
         suspendCancellableCoroutine { cont ->
