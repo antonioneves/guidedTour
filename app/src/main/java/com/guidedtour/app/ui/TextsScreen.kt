@@ -111,7 +111,7 @@ fun TextsScreen(viewModel: TourViewModel, onOpenSettings: () -> Unit) {
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top),
         topBar = {
             TopAppBar(
-                title = { Text("Guides") },
+                title = { Text("Guides", style = MaterialTheme.typography.displaySmall) },
                 actions = {
                     IconButton(onClick = { onlyFavorites = !onlyFavorites }) {
                         Icon(
