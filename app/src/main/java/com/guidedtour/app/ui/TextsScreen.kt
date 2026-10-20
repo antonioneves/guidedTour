@@ -110,7 +110,7 @@ fun TextsScreen(viewModel: TourViewModel, onOpenSettings: () -> Unit) {
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top),
         topBar = {
             LargeFlexibleTopAppBar(
-                title = { Text("Scanned texts") },
+                title = { Text("Guides") },
                 subtitle = { Text(if (scans.size == 1) "1 text saved" else "${scans.size} texts saved") },
                 actions = { IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings") } },
                 scrollBehavior = scrollBehavior,
