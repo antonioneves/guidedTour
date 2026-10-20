@@ -12,7 +12,7 @@ All items below are implemented except a migration test. The voice picker (per-l
 a spoken sample) is in the settings sheet. Checked on the emulator: visit grouping, play visit and the queue, queue sheet, settings sheet,
 translation (stored and shown on the card), no-key map message, camera kept alive across tabs.
 Not exercised: thumbnails and photo OCR (the emulator camera has no text), editing text, volume
-shutter, route line (needs a Maps key), non-Latin OCR, TalkBack.
+shutter, route line, non-Latin OCR, TalkBack.
 
 ## Fixes and improvements
 
@@ -28,9 +28,9 @@ shutter, route line (needs a Maps key), non-Latin OCR, TalkBack.
    so music or another app can talk over the reading.
 4. **OCR mistakes can't be fixed.** Plaques often use stylised fonts, so a quick "edit text" before
    or after saving would help.
-5. **The map is blank without a Maps API key.** Add the key to `local.properties` (`MAPS_API_KEY`).
-   The map should also show a message instead of an empty grey map when the key or the internet
-   connection is missing.
+5. **The map is blank without a Maps API key.** Replaced: the map now uses MapLibre with free
+   OpenStreetMap tiles from OpenFreeMap, which need no key or account, and shows a message when
+   offline.
 6. **Switching tabs restarts the camera and map**, so each switch is slower than it needs to be.
    Keeping them alive would make it feel snappier.
 7. **The database has no upgrade path.** The first time its structure changes, existing users'

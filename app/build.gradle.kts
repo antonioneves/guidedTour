@@ -22,7 +22,6 @@ android {
         val localProps = Properties().apply {
             rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
         }
-        manifestPlaceholders["MAPS_API_KEY"] = localProps.getProperty("MAPS_API_KEY", "")
         // Optional: enables the "Improve with cloud" button (uploads the photo to Google Cloud Vision).
         buildConfigField("String", "VISION_API_KEY", "\"${localProps.getProperty("VISION_API_KEY", "")}\"")
     }
@@ -49,6 +48,8 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfigs.findByName("release")?.let { signingConfig = it }
+            // Phones only: the x86 libraries (for emulators) would add over 50 MB. Debug builds keep them.
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         }
     }
     compileOptions {
@@ -114,7 +115,6 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
 
-    // Map
-    implementation("com.google.maps.android:maps-compose:9.0.1")
-    implementation("com.google.android.gms:play-services-maps:20.1.0")
+    // Map: MapLibre with free OpenStreetMap tiles from OpenFreeMap (no API key)
+    implementation("org.maplibre.gl:android-sdk:13.7.1")
 }

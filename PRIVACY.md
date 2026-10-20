@@ -13,8 +13,9 @@ Guided Tour reads text from plaques and labels you photograph and reads it aloud
 - **Location.** When you scan, the app records your approximate or precise location and, using the
   Android geocoder, a place name. This is stored with the scan on your device. The place-name lookup
   may be handled by Google's location services.
-- **Maps.** The Places tab uses Google Maps, which receives the usual map-loading requests
-  (such as your IP address and the area shown) under [Google's privacy policy](https://policies.google.com/privacy).
+- **Maps.** The Places tab loads OpenStreetMap map tiles from [OpenFreeMap](https://openfreemap.org).
+  Its servers receive the usual map-loading requests (such as your IP address and the area shown),
+  but not your scans or route, which are drawn on the device.
 - **Language packs.** Translation downloads language models from Google the first time you use a
   language. Only the model download happens online; your text is translated on the device.
 

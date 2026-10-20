@@ -16,12 +16,13 @@ scanned, and reads it aloud, also with the screen off.
   end of the queue, and the queue can be reordered, skipped or edited.
 - **Guides**: every scan is saved, grouped into visits by day and place, with a photo thumbnail,
   search, favourites, "Play visit", text editing and swipe to delete.
-- **Places**: a map of where each text was scanned, with the walking route of each day.
+- **Places**: an OpenStreetMap map of where each text was scanned, with the walking route of
+  each day. No map key or account needed.
 - **Translate** on the device into the phone's language (models download once).
 - **Scripts**: Latin, Chinese, Japanese, Korean and Devanagari, detected automatically.
 - **Improve with cloud** (optional): sends one photo to Google Cloud Vision for a second reading.
 
-Everything except the map, translation model downloads and the optional cloud reading works
+Everything except new map areas, translation model downloads and the optional cloud reading works
 offline. See [PRIVACY.md](PRIVACY.md) for what leaves the device.
 
 ## Requirements
@@ -32,10 +33,9 @@ offline. See [PRIVACY.md](PRIVACY.md) for what leaves the device.
 
 ## Setup
 
-Optional keys go in `local.properties` (git-ignored):
+An optional key goes in `local.properties` (git-ignored):
 
 ```properties
-MAPS_API_KEY=...     # Google Maps SDK for Android; without it the Places tab shows a message
 VISION_API_KEY=...   # Google Cloud Vision; enables "Improve with cloud"
 ```
 
@@ -70,7 +70,7 @@ key. Without the file, release builds are left unsigned.
 (Actions → Release APK → Run workflow) or push a version tag (`git tag v1.0 && git push --tags`),
 which also publishes a GitHub release with the APK. It needs these repository secrets:
 `RELEASE_KEYSTORE_BASE64` (`base64 -i release.jks`), `RELEASE_STORE_PASSWORD`,
-`RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD` and optionally `MAPS_API_KEY`. Raise `versionCode` in
+`RELEASE_KEY_ALIAS` and `RELEASE_KEY_PASSWORD`. Raise `versionCode` in
 `app/build.gradle.kts` before each release uploaded to Google Play.
 
 ### Baseline profile
@@ -129,4 +129,5 @@ transcripts give far more useful numbers than the synthetic set.
 ## Tech stack
 
 Kotlin, Jetpack Compose with Material 3 Expressive, CameraX, ML Kit (text recognition, language
-identification, translation), Android TextToSpeech, Room, Maps Compose and AndroidX Media.
+identification, translation), Android TextToSpeech, Room, MapLibre with OpenStreetMap tiles from
+OpenFreeMap, and AndroidX Media.

@@ -7,7 +7,6 @@
 # Repository secrets (Settings → Secrets and variables → Actions):
 #   RELEASE_KEYSTORE_BASE64  release.jks encoded with: base64 -i release.jks | pbcopy
 #   RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD  values from keystore.properties
-#   MAPS_API_KEY             optional
 # Without the keystore secrets the APK is built unsigned.
 name: Release APK
 
@@ -43,7 +42,6 @@ jobs:
           STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-          MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 --decode > release.jks
@@ -52,7 +50,6 @@ jobs:
           else
             echo "::warning::No signing secrets set; building an unsigned APK."
           fi
-          printf 'MAPS_API_KEY=%s\n' "$MAPS_API_KEY" > local.properties
 
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest
