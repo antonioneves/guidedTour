@@ -8,6 +8,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
 import android.speech.tts.UtteranceProgressListener
@@ -44,6 +45,9 @@ data class PlayerState(
  */
 class TextReader private constructor(context: Context) {
     companion object {
+        /** Speaking pace at normal speed until one has been measured, to turn seconds into text. */
+        private const val DEFAULT_CHARS_PER_SECOND = 16f
+
         @Volatile private var instance: TextReader? = null
         fun get(context: Context): TextReader =
             instance ?: synchronized(this) { instance ?: TextReader(context.applicationContext).also { instance = it } }
@@ -68,6 +72,12 @@ class TextReader private constructor(context: Context) {
     private var index = -1
     private var chunks: List<Chunk> = emptyList()
     private var chunkIndex = 0
+    /** Where speaking starts inside the current sentence: 0, or a word after a seek. */
+    private var startInChunk = 0
+    /** Measured speaking pace in characters per second (0 until measured), from word timings. */
+    private var pace = 0f
+    private var lastWordAt = 0L
+    private var lastWordOffset = -1
     private var playing = false
     private var highlight: IntRange? = null
     private var generation = 0
@@ -182,6 +192,36 @@ class TextReader private constructor(context: Context) {
 
     fun stop() = finish()
 
+    /**
+     * Jumps about [seconds] back (negative) or forward in the current text. Speech has no clock, so
+     * the distance is estimated from the text length and speed; reading restarts at a word.
+     * Forward past the end goes to the next item; back past the start restarts this one.
+     */
+    fun seekBy(seconds: Int) {
+        if (index < 0 || chunks.isEmpty()) return
+        val here = highlight?.first ?: (chunks[chunkIndex].start + startInChunk)
+        val charsPerSecond = if (pace > 0f) pace else DEFAULT_CHARS_PER_SECOND * settings.rate.value
+        val target = here + (seconds * charsPerSecond).toInt()
+        if (target >= queue[index].text.length) { next(); return }
+        seekTo(target.coerceAtLeast(0))
+    }
+
+    private fun seekTo(offset: Int) {
+        val wasPlaying = playing
+        if (wasPlaying) interrupt()
+        chunkIndex = chunks.indexOfLast { it.start <= offset }.coerceAtLeast(0)
+        val chunk = chunks[chunkIndex]
+        var local = (offset - chunk.start).coerceIn(0, chunk.text.length)
+        while (local > 0 && !chunk.text[local - 1].isWhitespace()) local--
+        startInChunk = local
+        highlight = null
+        if (wasPlaying) {
+            playing = true
+            speakChunk()
+        }
+        publish()
+    }
+
     // ---- Playback ----
 
     private fun startItem(position: Int) {
@@ -190,6 +230,8 @@ class TextReader private constructor(context: Context) {
         val maxLen = minOf(TextToSpeech.getMaxSpeechInputLength() - 1, 1500)
         chunks = splitForSpeech(item.text, maxLen, localeFor(item.languageTag))
         chunkIndex = 0
+        startInChunk = 0
+        lastWordOffset = -1
         highlight = null
         if (chunks.isEmpty()) { next(); return }
         playing = true
@@ -205,7 +247,8 @@ class TextReader private constructor(context: Context) {
             val locale = localeFor(item.languageTag)
             configureVoice(locale, settings.voices.value[locale.language])
             val id = ++generation
-            if (tts.speak(chunk.text, TextToSpeech.QUEUE_FLUSH, null, id.toString()) == TextToSpeech.ERROR) {
+            val text = chunk.text.substring(startInChunk.coerceAtMost(chunk.text.length))
+            if (tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id.toString()) == TextToSpeech.ERROR) {
                 onChunkFinished(id.toString())
             }
         }
@@ -273,6 +316,7 @@ class TextReader private constructor(context: Context) {
     private fun onChunkFinished(utteranceId: String?) {
         if (!playing || utteranceId != generation.toString()) return
         chunkIndex++
+        startInChunk = 0
         highlight = null
         if (chunkIndex < chunks.size) {
             speakChunk()
@@ -284,13 +328,29 @@ class TextReader private constructor(context: Context) {
 
     private fun onRange(utteranceId: String?, start: Int, end: Int) {
         if (!playing || utteranceId != generation.toString()) return
-        val offset = chunks.getOrNull(chunkIndex)?.start ?: return
+        val offset = (chunks.getOrNull(chunkIndex)?.start ?: return) + startInChunk
         highlight = (offset + start) until (offset + end)
+        measurePace(offset + start)
         publish()
+    }
+
+    /** Updates [pace] from the time between spoken words; pauses between sentences count too. */
+    private fun measurePace(position: Int) {
+        val now = SystemClock.elapsedRealtime()
+        if (lastWordOffset in 0 until position) {
+            val seconds = (now - lastWordAt) / 1000f
+            if (seconds in 0.05f..3f) {
+                val sample = (position - lastWordOffset) / seconds
+                pace = if (pace == 0f) sample else pace * 0.9f + sample * 0.1f
+            }
+        }
+        lastWordAt = now
+        lastWordOffset = position
     }
 
     /** Stops speaking but keeps the queue and position. */
     private fun interrupt() {
+        lastWordOffset = -1
         playing = false
         generation++
         pending = null
@@ -303,6 +363,7 @@ class TextReader private constructor(context: Context) {
         index = -1
         chunks = emptyList()
         chunkIndex = 0
+        startInChunk = 0
         highlight = null
         resumeOnFocusGain = false
         abandonFocus()

@@ -178,6 +178,8 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     fun pause() = reader.pause()
     fun next() = reader.next()
     fun previous() = reader.previous()
+    fun seekBack() = reader.seekBy(-SEEK_SECONDS)
+    fun seekForward() = reader.seekBy(SEEK_SECONDS)
     fun stopSpeaking() = reader.stop()
     fun removeFromQueue(position: Int) = reader.removeAt(position)
     fun moveInQueue(position: Int, delta: Int) = reader.move(position, delta)
@@ -263,3 +265,6 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     }
 }
+
+/** How far the player's back and forward buttons jump. */
+const val SEEK_SECONDS = 10

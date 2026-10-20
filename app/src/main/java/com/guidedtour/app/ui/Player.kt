@@ -3,6 +3,11 @@ package com.guidedtour.app.ui
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.foundation.Image
+import com.guidedtour.app.SEEK_SECONDS
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.foundation.layout.height
 import com.guidedtour.app.BuildConfig
 import com.guidedtour.app.data.Translator
 import androidx.compose.material3.AlertDialog
@@ -203,26 +208,40 @@ fun NowPlayingBar(player: PlayerState, viewModel: TourViewModel, onOpenQueue: ()
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         tonalElevation = 3.dp,
     ) {
-        Row(
-            Modifier.clickable(onClickLabel = "Open reading queue", onClick = onOpenQueue).padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                val position = if (player.queue.size > 1) "${player.index + 1} of ${player.queue.size} · " else ""
-                Text(
-                    position + item.text,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+        Column(Modifier.clickable(onClickLabel = "Open reading queue", onClick = onOpenQueue)) {
+            // How far through the text the reading is (from the word being spoken).
+            val progress = player.highlight?.let { (it.last + 1).toFloat() / item.text.length.coerceAtLeast(1) } ?: 0f
+            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(3.dp), drawStopIndicator = {})
+            Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f).padding(top = 4.dp)) {
+                    Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val position = if (player.queue.size > 1) "${player.index + 1} of ${player.queue.size} · " else ""
+                    Text(
+                        position + item.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                IconButton(onClick = viewModel::stopSpeaking) { Icon(Icons.Filled.Close, "Stop and clear queue") }
             }
-            IconButton(onClick = viewModel::previous) { Icon(Icons.Filled.SkipPrevious, "Previous") }
-            FilledIconButton(onClick = viewModel::togglePlayback) {
-                Icon(if (player.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (player.playing) "Pause" else "Play")
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = viewModel::previous) { Icon(Icons.Filled.SkipPrevious, "Previous") }
+                IconButton(onClick = viewModel::seekBack) { Icon(Icons.Filled.Replay10, "Back $SEEK_SECONDS seconds") }
+                FilledIconButton(onClick = viewModel::togglePlayback, modifier = Modifier.size(56.dp)) {
+                    Icon(
+                        if (player.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        if (player.playing) "Pause" else "Play",
+                        Modifier.size(32.dp),
+                    )
+                }
+                IconButton(onClick = viewModel::seekForward) { Icon(Icons.Filled.Forward10, "Forward $SEEK_SECONDS seconds") }
+                IconButton(onClick = viewModel::next) { Icon(Icons.Filled.SkipNext, "Next") }
             }
-            IconButton(onClick = viewModel::next) { Icon(Icons.Filled.SkipNext, "Next") }
-            IconButton(onClick = viewModel::stopSpeaking) { Icon(Icons.Filled.Close, "Stop and clear queue") }
         }
     }
 }
