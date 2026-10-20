@@ -255,6 +255,8 @@ private fun ScanCard(
     var editing by remember { mutableStateOf(false) }
     var choosing by remember { mutableStateOf(false) }
     var confirmCloud by remember { mutableStateOf(false) }
+    var viewing by remember { mutableStateOf(false) }
+    if (viewing && scan.thumbnail != null) PhotoViewer(scan.thumbnail, onDismiss = { viewing = false })
     val current = player.current?.takeIf { it.id == scan.id }
     val active = current != null
     val playing = active && player.playing
@@ -335,7 +337,11 @@ private fun ScanCard(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(end = 8.dp)) {
-                Thumbnail(scan.thumbnail, Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)), maxSide = 256)
+                Thumbnail(
+                    scan.thumbnail,
+                    Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "View photo") { viewing = true },
+                    maxSide = 256,
+                )
                 HighlightedText(
                     scan.text,
                     if (current?.translated == false) player.highlight else null,

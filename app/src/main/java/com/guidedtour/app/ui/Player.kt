@@ -3,6 +3,20 @@ package com.guidedtour.app.ui
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.foundation.Image
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.material3.RadioButton
@@ -100,7 +114,7 @@ fun HighlightedText(
 
 /** Plaque photo loaded from private storage; nothing is shown if it is missing. */
 @Composable
-fun Thumbnail(path: String?, modifier: Modifier = Modifier, maxSide: Int = 480) {
+fun Thumbnail(path: String?, modifier: Modifier = Modifier, maxSide: Int = 480, contentScale: ContentScale = ContentScale.Crop) {
     if (path == null) return
     val key = "$path@$maxSide"
     val bitmap by produceState<ImageBitmap?>(thumbnailCache.get(key), key) {
@@ -116,7 +130,57 @@ fun Thumbnail(path: String?, modifier: Modifier = Modifier, maxSide: Int = 480) 
         }?.also { thumbnailCache.put(key, it) }
     }
     bitmap?.let {
-        Image(it, contentDescription = "Photo of the plaque", contentScale = ContentScale.Crop, modifier = modifier)
+        Image(it, contentDescription = "Photo of the plaque", contentScale = contentScale, modifier = modifier)
+    }
+}
+
+/** The saved photo full screen: pinch or double-tap to zoom, drag to move, back or ✕ to close. */
+@Composable
+fun PhotoViewer(path: String, onDismiss: () -> Unit) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    // Keep the zoomed photo covering the screen instead of sliding off it.
+    fun clamp(o: Offset, s: Float) = Offset(
+        o.x.coerceIn(-(s - 1) * size.width / 2, (s - 1) * size.width / 2),
+        o.y.coerceIn(-(s - 1) * size.height / 2, (s - 1) * size.height / 2),
+    )
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .onSizeChanged { size = it }
+                .pointerInput(Unit) {
+                    detectTapGestures(onDoubleTap = {
+                        if (scale > 1f) { scale = 1f; offset = Offset.Zero } else scale = 2.5f
+                    })
+                }
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        scale = (scale * zoom).coerceIn(1f, 6f)
+                        offset = clamp(offset + pan, scale)
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Thumbnail(
+                path,
+                Modifier.fillMaxSize().graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offset.x
+                    translationY = offset.y
+                },
+                maxSide = 2048,
+                contentScale = ContentScale.Fit,
+            )
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(8.dp),
+                colors = IconButtonDefaults.iconButtonColors(containerColor = Color.Black.copy(alpha = 0.5f), contentColor = Color.White),
+            ) { Icon(Icons.Filled.Close, "Close photo") }
+        }
     }
 }
 
