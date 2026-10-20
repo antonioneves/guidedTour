@@ -28,36 +28,28 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.outlined.BlurOn
 import androidx.compose.material.icons.outlined.CropFree
 import androidx.compose.material.icons.outlined.DocumentScanner
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.ZoomIn
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -68,25 +60,20 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -114,16 +101,13 @@ import com.guidedtour.app.data.Recognizer
 import com.guidedtour.app.data.cleanOcr
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
-import com.guidedtour.app.data.PlayerState
-import com.guidedtour.app.data.paragraphsOf
-import com.guidedtour.app.data.Scan
-import com.guidedtour.app.data.Translator
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 
 private const val AUTO_CAPTURE_MS = 2500L
 private const val IDLE_RELEASE_MS = 20_000L
 private const val CAREFUL_PHOTOS = 3
+private const val FLASH_MS = 250
 
 /** Takes one photo; null if the camera failed. The caller owns (and must close) the image. */
 private suspend fun takePhoto(controller: LifecycleCameraController, executor: java.util.concurrent.Executor): ImageProxy? =
@@ -223,7 +207,7 @@ private fun hasCameraPermission(context: android.content.Context) =
     ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
 @Composable
-fun CameraScreen(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () -> Unit) {
+fun CameraScreen(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () -> Unit, onCaptured: () -> Unit) {
     val context = LocalContext.current
     var hasCamera by remember { mutableStateOf(hasCameraPermission(context)) }
     // Re-check on resume so granting the permission dialog takes effect immediately.
@@ -231,7 +215,7 @@ fun CameraScreen(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () 
         hasCamera = hasCameraPermission(context)
         onPauseOrDispose {}
     }
-    if (hasCamera) CameraContent(viewModel, visible, onOpenSettings) else CameraPermissionNeeded()
+    if (hasCamera) CameraContent(viewModel, visible, onOpenSettings, onCaptured) else CameraPermissionNeeded()
 }
 
 @Composable
@@ -262,7 +246,7 @@ private fun CameraPermissionNeeded() {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () -> Unit) {
+private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSettings: () -> Unit, onCaptured: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -278,6 +262,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
     var autoCapture by remember { mutableStateOf(true) }
     var armed by remember { mutableStateOf(true) }
     val countdown = remember { Animatable(0f) }
+    val flash = remember { Animatable(0f) }
     val snackbar = remember { SnackbarHostState() }
 
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -340,16 +325,19 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
     fun capture() {
         if (!visible || !viewModel.beginCapture()) return
         armed = false
-        viewModel.dismissResult()
         val liveText = frame.text
         val photos = if (careful) CAREFUL_PHOTOS else 1
         scope.launch {
             // Take a few photos in a row; the view model keeps the sharpest and reads it.
-            repeat(photos) {
+            repeat(photos) { i ->
+                // A camera-style flash on the first photo shows the capture happened.
+                if (i == 0) launch { flash.snapTo(0.85f); flash.animateTo(0f, tween(FLASH_MS)) }
                 val image = takePhoto(controller, ContextCompat.getMainExecutor(context))
                 if (image != null) viewModel.addFrame(image)
             }
             viewModel.finishCapture(liveText)
+            // The new card appears in Guides, with a loading card while the photo is read.
+            onCaptured()
         }
     }
 
@@ -429,6 +417,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
         ) { Icon(Icons.Filled.Settings, "Settings") }
 
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp))
+        if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
 
         Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp)) {
             if (state == ScanState.Processing) {
@@ -439,16 +428,6 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
                 Shutter(progress = countdown.value, onClick = ::capture)
             }
         }
-    }
-
-    (state as? ScanState.Done)?.let { done ->
-        val scans by viewModel.scans.collectAsStateWithLifecycle()
-        ResultSheet(
-            scan = scans.firstOrNull { it.id == done.scan.id } ?: done.scan,
-            player = player,
-            viewModel = viewModel,
-            onDismiss = viewModel::dismissResult,
-        )
     }
 }
 
@@ -490,90 +469,4 @@ private fun Shutter(progress: Float, onClick: () -> Unit) {
             }
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ResultSheet(scan: Scan, player: PlayerState, viewModel: TourViewModel, onDismiss: () -> Unit) {
-    val translating by viewModel.translating.collectAsStateWithLifecycle()
-    var editing by remember { mutableStateOf(false) }
-    var choosing by remember { mutableStateOf(false) }
-    var confirmCloud by remember { mutableStateOf(false) }
-    val cloudReading by viewModel.cloudReading.collectAsStateWithLifecycle()
-    val current = player.current?.takeIf { it.id == scan.id && !it.translated }
-    val queuedAt = player.queue.indexOfFirst { it.id == scan.id && !it.translated }
-    val waiting = queuedAt > player.index
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.padding(horizontal = 24.dp).padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    scan.whenAndWhere(),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f),
-                )
-                FavoriteButton(scan) { viewModel.toggleFavorite(scan) }
-            }
-            Thumbnail(scan.thumbnail, Modifier.fillMaxWidth().heightIn(max = 160.dp).clip(RoundedCornerShape(12.dp)))
-            HighlightedText(
-                scan.text, current?.let { player.highlight }, MaterialTheme.typography.bodyLarge,
-                Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState()),
-            )
-            if (waiting) {
-                val ahead = queuedAt - player.index
-                Text(
-                    if (ahead == 1) "Queued – plays after the current text." else "Queued – plays after $ahead more texts.",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (current != null) {
-                    Button(onClick = viewModel::togglePlayback) {
-                        Icon(if (player.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(ButtonDefaults.IconSize))
-                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                        Text(if (player.playing) "Pause" else "Resume")
-                    }
-                } else {
-                    Button(onClick = { viewModel.playNow(scan) }) {
-                        Icon(Icons.Filled.PlayArrow, null, Modifier.size(ButtonDefaults.IconSize))
-                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                        Text(if (player.active) "Play now" else "Read aloud")
-                    }
-                    if (player.active && !waiting) {
-                        OutlinedButton(onClick = { viewModel.playNext(scan) }) { Text("Play next") }
-                    }
-                }
-                TextButton(onClick = onDismiss) { Text("Keep scanning") }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { editing = true }) {
-                    Icon(Icons.Filled.Edit, null, Modifier.size(ButtonDefaults.IconSize))
-                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                    Text("Fix text")
-                }
-                if (paragraphsOf(scan.text).size > 1) {
-                    TextButton(onClick = { choosing = true }) { Text("Choose paragraphs") }
-                }
-                if (viewModel.cloudAvailable && scan.thumbnail != null) {
-                    TextButton(onClick = { confirmCloud = true }, enabled = scan.id !in cloudReading) {
-                        Text(if (scan.id in cloudReading) "Reading…" else "Improve with cloud")
-                    }
-                }
-                if (Translator.needsTranslation(scan.languageTag)) {
-                    TextButton(onClick = { viewModel.translate(scan) }, enabled = scan.id !in translating) {
-                        Icon(Icons.Filled.Translate, null, Modifier.size(ButtonDefaults.IconSize))
-                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                        Text(if (scan.id in translating) "Translating…" else "Translate")
-                    }
-                }
-            }
-        }
-    }
-    if (editing) EditTextDialog(scan.text, onDismiss = { editing = false }) { viewModel.editText(scan, it) }
-    if (choosing) ChooseParagraphsDialog(scan.text, onDismiss = { choosing = false }) { viewModel.editText(scan, it) }
-    if (confirmCloud) CloudConfirmDialog(onDismiss = { confirmCloud = false }) { viewModel.improveWithCloud(scan) }
 }

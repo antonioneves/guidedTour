@@ -50,7 +50,8 @@ fun TourTheme(content: @Composable () -> Unit) {
     }
     MaterialExpressiveTheme(
         colorScheme = colors,
-        motionScheme = MotionScheme.expressive(),
+        // Standard motion: the expressive springs bounce longer and felt sluggish.
+        motionScheme = MotionScheme.standard(),
         content = content,
     )
 }

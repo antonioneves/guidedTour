@@ -1,6 +1,7 @@
 package com.guidedtour.app.ui
 
 import android.graphics.BitmapFactory
+import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.DisposableEffect
@@ -99,22 +100,29 @@ fun HighlightedText(
 
 /** Plaque photo loaded from private storage; nothing is shown if it is missing. */
 @Composable
-fun Thumbnail(path: String?, modifier: Modifier = Modifier) {
+fun Thumbnail(path: String?, modifier: Modifier = Modifier, maxSide: Int = 480) {
     if (path == null) return
-    val bitmap by produceState<ImageBitmap?>(null, path) {
+    val key = "$path@$maxSide"
+    val bitmap by produceState<ImageBitmap?>(thumbnailCache.get(key), key) {
+        if (value != null) return@produceState
         value = withContext(Dispatchers.IO) {
             runCatching {
                 // Photos are stored large (for re-reading); decode a smaller copy for the list.
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { BitmapFactory.decodeFile(path, it) }
                 var sample = 1
-                while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 480) sample *= 2
+                while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
                 BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
             }.getOrNull()
-        }
+        }?.also { thumbnailCache.put(key, it) }
     }
     bitmap?.let {
         Image(it, contentDescription = "Photo of the plaque", contentScale = ContentScale.Crop, modifier = modifier)
     }
+}
+
+/** Decoded thumbnails, so scrolling back through the list doesn't decode them again. */
+private val thumbnailCache = object : LruCache<String, ImageBitmap>(24 * 1024 * 1024) {
+    override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
 }
 
 /** Compact player shown above the navigation bar whenever something is queued or playing. */

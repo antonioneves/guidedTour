@@ -33,6 +33,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.guidedtour.app.R
+import com.guidedtour.app.ScanState
 import com.guidedtour.app.TourViewModel
 
 private enum class Tab(val label: String, val icon: ImageVector?, val selectedIcon: ImageVector?, @DrawableRes val iconRes: Int? = null) {
@@ -63,6 +64,15 @@ fun TourApp(viewModel: TourViewModel) {
     val snackbar = remember { SnackbarHostState() }
 
     LaunchedEffect(selected) { viewModel.scanTabVisible.value = selected == Tab.Scan }
+    // Show each new scan in Guides as soon as it's read; go back to the camera if no text was found.
+    val scanState by viewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(scanState) {
+        when (scanState) {
+            is ScanState.Done -> selected = Tab.Guides
+            ScanState.NoText -> selected = Tab.Scan
+            else -> Unit
+        }
+    }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
 
     NavigationSuiteScaffold(
@@ -87,7 +97,7 @@ fun TourApp(viewModel: TourViewModel) {
                 // It sits underneath; the other tabs are opaque and cover it.
                 val onScan = selected == Tab.Scan
                 Box(Modifier.fillMaxSize().then(if (onScan) Modifier else Modifier.clearAndSetSemantics {})) {
-                    CameraScreen(viewModel, visible = onScan, onOpenSettings = { showSettings = true })
+                    CameraScreen(viewModel, visible = onScan, onOpenSettings = { showSettings = true }, onCaptured = { selected = Tab.Guides })
                 }
                 when (selected) {
                     Tab.Scan -> Unit
