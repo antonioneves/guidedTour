@@ -71,7 +71,7 @@ key. Without the file, release builds are left unsigned.
 which also publishes a GitHub release with the APK. It needs these repository secrets:
 `RELEASE_KEYSTORE_BASE64` (`base64 -i release.jks`), `RELEASE_STORE_PASSWORD`,
 `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD` and optionally `MAPS_API_KEY`. Raise `versionCode` in
-`app/build.gradle.kts` before each release that will be installed over an earlier one.
+`app/build.gradle.kts` before each release uploaded to Google Play.
 
 ### Baseline profile
 
