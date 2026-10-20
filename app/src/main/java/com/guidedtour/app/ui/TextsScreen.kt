@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material3.ButtonDefaults
@@ -43,10 +44,10 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -91,7 +92,7 @@ fun TextsScreen(viewModel: TourViewModel, onOpenSettings: () -> Unit) {
     val scans by viewModel.scans.collectAsStateWithLifecycle()
     val player by viewModel.player.collectAsStateWithLifecycle()
     val translating by viewModel.translating.collectAsStateWithLifecycle()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
@@ -109,10 +110,18 @@ fun TextsScreen(viewModel: TourViewModel, onOpenSettings: () -> Unit) {
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top),
         topBar = {
-            LargeFlexibleTopAppBar(
+            TopAppBar(
                 title = { Text("Guides") },
-                subtitle = { Text(if (scans.size == 1) "1 text saved" else "${scans.size} texts saved") },
-                actions = { IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings") } },
+                actions = {
+                    IconButton(onClick = { onlyFavorites = !onlyFavorites }) {
+                        Icon(
+                            if (onlyFavorites) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                            if (onlyFavorites) "Show all texts" else "Show favourites only",
+                            tint = if (onlyFavorites) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                        )
+                    }
+                    IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings") }
+                },
                 scrollBehavior = scrollBehavior,
             )
         },
@@ -141,12 +150,6 @@ fun TextsScreen(viewModel: TourViewModel, onOpenSettings: () -> Unit) {
                             },
                             singleLine = true,
                             shape = RoundedCornerShape(28.dp),
-                        )
-                        FilterChip(
-                            selected = onlyFavorites,
-                            onClick = { onlyFavorites = !onlyFavorites },
-                            label = { Text("Favourites") },
-                            leadingIcon = { Icon(Icons.Filled.Star, null, Modifier.size(18.dp)) },
                         )
                     }
                 }
