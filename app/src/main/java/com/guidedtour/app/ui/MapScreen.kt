@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,8 +32,6 @@ import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -53,6 +52,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -297,16 +297,18 @@ private fun PlaceRow(place: Place, player: PlayerState, highlighted: Boolean, on
     val first = place.scans.first()
     val active = player.current?.id in place.scans.map { it.id }
     val playing = active && player.playing
-    ListItem(
-        modifier = Modifier.clickable(onClickLabel = "Show on the map", onClick = onClick),
-        colors = ListItemDefaults.colors(
-            containerColor = when {
-                active -> MaterialTheme.colorScheme.primaryContainer
-                highlighted -> MaterialTheme.colorScheme.secondaryContainer
-                else -> Color.Transparent
-            },
-        ),
-        leadingContent = {
+    val background = when {
+        active -> MaterialTheme.colorScheme.primaryContainer
+        highlighted -> MaterialTheme.colorScheme.secondaryContainer
+        else -> Color.Transparent
+    }
+    // Pin (or count) with the time below it, then the place and its text, then play centred.
+    Row(
+        Modifier.fillMaxWidth().background(background).clickable(onClickLabel = "Show on the map", onClick = onClick)
+            .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.width(64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(40.dp)) {
                 Box(contentAlignment = Alignment.Center) {
                     if (place.scans.size > 1) {
@@ -316,30 +318,35 @@ private fun PlaceRow(place: Place, player: PlayerState, highlighted: Boolean, on
                     }
                 }
             }
-        },
-        headlineContent = { Text(first.placeLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = {
             Text(
-                if (place.scans.size == 1) first.text else "${place.scans.size} texts · ${place.scans.last().timeLabel()}",
+                place.scans.last().timeLabel(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text(first.placeLabel(), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                if (place.scans.size == 1) first.text else "${place.scans.size} texts",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-        },
-        trailingContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (place.scans.size == 1) Text(first.timeLabel(), style = MaterialTheme.typography.labelMedium)
-                val description = when {
-                    playing -> "Pause"
-                    active -> "Resume"
-                    place.scans.size == 1 -> "Read aloud"
-                    else -> "Read all aloud"
-                }
-                FilledTonalIconButton(onClick = onPlay) {
-                    Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, description)
-                }
-            }
-        },
-    )
+        }
+        val description = when {
+            playing -> "Pause"
+            active -> "Resume"
+            place.scans.size == 1 -> "Read aloud"
+            else -> "Read all aloud"
+        }
+        FilledTonalIconButton(onClick = onPlay) {
+            Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, description)
+        }
+    }
 }
 
 /** MapLibre's MapView, following the screen's lifecycle. */
