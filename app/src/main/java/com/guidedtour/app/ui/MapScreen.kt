@@ -62,6 +62,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.guidedtour.app.TourViewModel
 import com.guidedtour.app.data.Scan
+import com.guidedtour.app.data.dailyRoutes
+import com.guidedtour.app.data.groupPlaces
 import kotlinx.coroutines.launch
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
@@ -71,6 +73,7 @@ import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
@@ -89,7 +92,10 @@ private const val DARK_STYLE = "https://tiles.openfreemap.org/styles/dark"
 
 private const val ROUTES = "routes"
 private const val PINS = "pins"
-private const val PIN_IMAGE = "pin"
+private const val ICON = "icon"
+private const val PLACE_INDEX = "place"
+
+private fun pinImage(count: Int) = if (count == 1) "pin" else "pin-$count"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,25 +112,21 @@ fun MapScreen(viewModel: TourViewModel) {
     }
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
-    var selected by remember { mutableStateOf<Scan?>(null) }
+    // The scans behind the tapped pin (one, or several taken close together), oldest first.
+    var selected by remember { mutableStateOf<List<Scan>>(emptyList()) }
     val dark = isSystemInDarkTheme()
     val routeColor = MaterialTheme.colorScheme.primary.toArgb()
     val bottomPadding = with(LocalDensity.current) { PeekHeight.toPx().toDouble() }
-    val currentLocated by rememberUpdatedState(located)
-
-    // One route line per day, oldest to newest.
-    val routes = remember(located) {
-        located.groupBy { java.time.Instant.ofEpochMilli(it.timestamp).atZone(java.time.ZoneId.systemDefault()).toLocalDate() }
-            .values.map { day -> day.sortedBy { it.timestamp }.map { Point.fromLngLat(it.longitude!!, it.latitude!!) } }
-            .filter { it.size > 1 }
-    }
+    // Scans taken close together share one pin; a day's route shows only for a real walk.
+    val places = remember(located) { groupPlaces(located) }
+    val routes = remember(places) { dailyRoutes(places).map { route -> route.map { Point.fromLngLat(it.longitude, it.latitude) } } }
+    val currentPlaces by rememberUpdatedState(places)
 
     // Load the light or dark style, then add the route and pin layers on top of it.
     LaunchedEffect(map, dark) {
         val m = map ?: return@LaunchedEffect
         style = null
         m.setStyle(Style.Builder().fromUri(if (dark) DARK_STYLE else LIGHT_STYLE)) { loaded ->
-            loaded.addImage(PIN_IMAGE, pinBitmap(context, routeColor))
             loaded.addSource(GeoJsonSource(ROUTES))
             loaded.addSource(GeoJsonSource(PINS))
             loaded.addLayer(
@@ -138,7 +140,7 @@ fun MapScreen(viewModel: TourViewModel) {
             )
             loaded.addLayer(
                 SymbolLayer(PINS, PINS).withProperties(
-                    PropertyFactory.iconImage(PIN_IMAGE),
+                    PropertyFactory.iconImage(Expression.get(ICON)),
                     PropertyFactory.iconAnchor(Property.ICON_ANCHOR_BOTTOM),
                     PropertyFactory.iconAllowOverlap(true),
                     PropertyFactory.iconIgnorePlacement(true),
@@ -149,25 +151,32 @@ fun MapScreen(viewModel: TourViewModel) {
     }
 
     // Keep the map data in step with the saved scans.
-    LaunchedEffect(style, routes, located) {
+    LaunchedEffect(style, routes, places) {
         val s = style ?: return@LaunchedEffect
+        // One pin image per group size: the plain pin, or one showing how many texts it holds.
+        places.map { it.scans.size }.distinct().forEach { count ->
+            if (s.getImage(pinImage(count)) == null) s.addImage(pinImage(count), pinBitmap(context, routeColor, count))
+        }
         s.getSourceAs<GeoJsonSource>(ROUTES)?.setGeoJson(
             FeatureCollection.fromFeatures(routes.map { Feature.fromGeometry(LineString.fromLngLats(it)) }),
         )
         s.getSourceAs<GeoJsonSource>(PINS)?.setGeoJson(
             FeatureCollection.fromFeatures(
-                located.map { scan ->
-                    Feature.fromGeometry(Point.fromLngLat(scan.longitude!!, scan.latitude!!)).apply { addNumberProperty("id", scan.id) }
+                places.mapIndexed { index, place ->
+                    Feature.fromGeometry(Point.fromLngLat(place.longitude, place.latitude)).apply {
+                        addNumberProperty(PLACE_INDEX, index)
+                        addStringProperty(ICON, pinImage(place.scans.size))
+                    }
                 },
             ),
         )
     }
 
     // Fit every recorded place on screen whenever the set of places changes.
-    LaunchedEffect(style, located.size) {
+    LaunchedEffect(style, places.size) {
         val m = map ?: return@LaunchedEffect
-        if (style == null || located.isEmpty()) return@LaunchedEffect
-        val points = located.map { LatLng(it.latitude!!, it.longitude!!) }
+        if (style == null || places.isEmpty()) return@LaunchedEffect
+        val points = places.map { LatLng(it.latitude, it.longitude) }
         if (points.size == 1) {
             m.easeCamera(CameraUpdateFactory.newCameraPosition(cameraAt(points[0], 17.0, bottomPadding)))
         } else {
@@ -204,7 +213,7 @@ fun MapScreen(viewModel: TourViewModel) {
                             modifier = Modifier.clickable {
                                 scope.launch {
                                     sheetState.bottomSheetState.partialExpand()
-                                    selected = scan
+                                    selected = listOf(scan)
                                     map?.animateCamera(
                                         CameraUpdateFactory.newCameraPosition(
                                             cameraAt(LatLng(scan.latitude!!, scan.longitude!!), 18.0, bottomPadding),
@@ -236,9 +245,9 @@ fun MapScreen(viewModel: TourViewModel) {
                     m.uiSettings.isCompassEnabled = true
                     m.addOnMapClickListener { point ->
                         val screen = m.projection.toScreenLocation(point)
-                        val id = m.queryRenderedFeatures(screen, PINS).firstOrNull()?.getNumberProperty("id")?.toLong()
-                        selected = currentLocated.firstOrNull { it.id == id }
-                        id != null
+                        val index = m.queryRenderedFeatures(screen, PINS).firstOrNull()?.getNumberProperty(PLACE_INDEX)?.toInt()
+                        selected = index?.let { currentPlaces.getOrNull(it)?.scans }.orEmpty()
+                        index != null
                     }
                     map = m
                 },
@@ -264,15 +273,23 @@ fun MapScreen(viewModel: TourViewModel) {
                         Text("You're offline – only places you've already viewed will show.", Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
                     }
                 }
-                selected?.let { scan -> SelectedPlace(scan, onPlay = { viewModel.playNow(scan) }, onClose = { selected = null }) }
+                if (selected.isNotEmpty()) {
+                    val group = selected
+                    SelectedPlace(
+                        group,
+                        onPlay = { if (group.size == 1) viewModel.playNow(group[0]) else viewModel.playAll(group) },
+                        onClose = { selected = emptyList() },
+                    )
+                }
             }
         }
     }
 }
 
-/** A card for the tapped pin, in place of Google Maps' info window. */
+/** A card for the tapped pin: its place and text, or how many texts it holds. Play reads them all, oldest first. */
 @Composable
-private fun SelectedPlace(scan: Scan, onPlay: () -> Unit, onClose: () -> Unit) {
+private fun SelectedPlace(scans: List<Scan>, onPlay: () -> Unit, onClose: () -> Unit) {
+    val scan = scans.first()
     Surface(
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         shape = MaterialTheme.shapes.large,
@@ -283,14 +300,14 @@ private fun SelectedPlace(scan: Scan, onPlay: () -> Unit, onClose: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text(scan.placeLabel(), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    scan.text,
+                    if (scans.size == 1) scan.text else "${scans.size} texts",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            IconButton(onClick = onPlay) { Icon(Icons.Filled.PlayArrow, "Read aloud") }
+            IconButton(onClick = onPlay) { Icon(Icons.Filled.PlayArrow, if (scans.size == 1) "Read aloud" else "Read all aloud") }
             IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close") }
         }
     }
@@ -338,8 +355,11 @@ private fun MapLibreView(bottomPadding: Int, onMapReady: (MapLibreMap) -> Unit) 
 private fun cameraAt(target: LatLng, zoom: Double, bottomPadding: Double): CameraPosition =
     CameraPosition.Builder().target(target).zoom(zoom).padding(0.0, 0.0, 0.0, bottomPadding).build()
 
-/** The Material "place" pin in [color] with a white outline, sized for the map. */
-private fun pinBitmap(context: Context, color: Int): Bitmap {
+/**
+ * The Material "place" pin in [color] with a white outline, sized for the map. With a [count] above
+ * one, the pin's head shows that number instead of a hole.
+ */
+private fun pinBitmap(context: Context, color: Int, count: Int = 1): Bitmap {
     val density = context.resources.displayMetrics.density
     val size = (36 * density).toInt()
     val path = PathParser.createPathFromPathData(
@@ -350,6 +370,17 @@ private fun pinBitmap(context: Context, color: Int): Bitmap {
         scale(size / 24f, size / 24f)
         drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f; this.color = android.graphics.Color.WHITE })
         drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color })
+        if (count > 1) {
+            drawCircle(12f, 9f, 4.6f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.WHITE })
+            val label = if (count > 99) "99+" else count.toString()
+            val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.color = color
+                textAlign = Paint.Align.CENTER
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                textSize = if (label.length == 1) 6.2f else if (label.length == 2) 5f else 3.8f
+            }
+            drawText(label, 12f, 9f - (text.descent() + text.ascent()) / 2, text)
+        }
     }
     return bitmap
 }
