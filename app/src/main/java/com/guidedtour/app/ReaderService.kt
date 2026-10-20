@@ -13,6 +13,7 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import com.guidedtour.app.data.PlayerState
@@ -60,7 +61,8 @@ class ReaderService : Service() {
             ACTION_PREVIOUS -> reader.previous()
             ACTION_STOP -> reader.stop()
         }
-        startForeground(NOTIFICATION_ID, buildNotification(reader.state.value), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        // ServiceCompat passes the service type only on Android 10+, where it exists.
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(reader.state.value), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         if (observing == null) {
             observing = scope.launch {
                 reader.state.collect { state ->
