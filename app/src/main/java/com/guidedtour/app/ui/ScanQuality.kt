@@ -46,3 +46,17 @@ fun evaluate(frame: LiveFrame, viewWidth: Int, viewHeight: Int, steady: Boolean 
     if (frame.glare > GLARE_SHARE) return Tip.Glare
     return Tip.Good
 }
+
+/** Live analysis is paused while a photo is being read. */
+const val ANALYSIS_PAUSED = -1L
+
+/**
+ * How often the live preview should run text recognition, to save battery: often while text is in
+ * view, a few times a second while searching for text, and slowly while a result is on screen.
+ */
+fun analysisIntervalMs(processing: Boolean, showingResult: Boolean, textInView: Boolean): Long = when {
+    processing -> ANALYSIS_PAUSED
+    showingResult -> 1000L
+    textInView -> 150L
+    else -> 500L
+}

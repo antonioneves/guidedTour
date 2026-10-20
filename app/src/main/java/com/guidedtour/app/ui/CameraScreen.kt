@@ -15,6 +15,7 @@ import android.content.pm.PackageManager
 import android.graphics.Matrix
 import android.net.Uri
 import android.provider.Settings
+import android.os.SystemClock
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -79,6 +80,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -117,6 +119,7 @@ import com.guidedtour.app.data.paragraphsOf
 import com.guidedtour.app.data.Scan
 import com.guidedtour.app.data.Translator
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 private const val AUTO_CAPTURE_MS = 2500L
 private const val IDLE_RELEASE_MS = 20_000L
@@ -160,16 +163,29 @@ private fun rememberSteady(active: Boolean): State<Boolean> {
 }
 private val EMPTY_FRAME = LiveFrame("", emptyList(), 255)
 
-/** Wraps MlKitAnalyzer so we can also measure frame brightness before it is consumed. */
-private class BrightnessAwareAnalyzer(
+/**
+ * Wraps MlKitAnalyzer to skip frames (see [analysisIntervalMs]) and to measure frame brightness
+ * before a frame is consumed.
+ */
+private class ThrottledAnalyzer(
     private val delegate: MlKitAnalyzer,
+    private val intervalMs: AtomicLong,
     private val onStats: (brightness: Int, glare: Float) -> Unit,
 ) : ImageAnalysis.Analyzer {
+    private var lastRun = 0L
+
     override fun getTargetCoordinateSystem() = delegate.targetCoordinateSystem
     override fun updateTransform(matrix: Matrix?) = delegate.updateTransform(matrix)
     override fun getDefaultTargetResolution() = delegate.defaultTargetResolution
 
     override fun analyze(image: ImageProxy) {
+        val interval = intervalMs.get()
+        val now = SystemClock.elapsedRealtime()
+        if (interval == ANALYSIS_PAUSED || now - lastRun < interval) {
+            image.close()
+            return
+        }
+        lastRun = now
         val plane = image.planes[0]
         val buffer = plane.buffer
         var sum = 0L
@@ -265,6 +281,16 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
     val snackbar = remember { SnackbarHostState() }
 
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    val analysisInterval = remember { AtomicLong(0L) }
+    SideEffect {
+        analysisInterval.set(
+            analysisIntervalMs(
+                processing = state is ScanState.Processing,
+                showingResult = state is ScanState.Done,
+                textInView = frame.lines.isNotEmpty(),
+            )
+        )
+    }
     val controller = remember {
         LifecycleCameraController(context).apply {
             setEnabledUseCases(CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE)
@@ -298,7 +324,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, onOpenSett
                 LiveFrame(cleanOcr(text.text), lines, brightness, glare)
             }
         }
-        controller.setImageAnalysisAnalyzer(analysisExecutor, BrightnessAwareAnalyzer(mlKit) { b, g -> brightness = b; glare = g })
+        controller.setImageAnalysisAnalyzer(analysisExecutor, ThrottledAnalyzer(mlKit, analysisInterval) { b, g -> brightness = b; glare = g })
         onDispose { controller.clearImageAnalysisAnalyzer() }
     }
     // Stay bound for a quick return, but release the camera if the tab is left for a while.

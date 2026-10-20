@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "GuidedTour"
 include(":app")
+include(":baselineprofile")

@@ -1,8 +1,10 @@
 package com.guidedtour.app
 
+import com.guidedtour.app.ui.ANALYSIS_PAUSED
 import com.guidedtour.app.ui.LineBox
 import com.guidedtour.app.ui.LiveFrame
 import com.guidedtour.app.ui.Tip
+import com.guidedtour.app.ui.analysisIntervalMs
 import com.guidedtour.app.ui.evaluate
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -35,5 +37,13 @@ class ScanQualityTest {
         val tip = evaluate(frame(line(), line(top = 700)), w, h)
         assertEquals(Tip.Good, tip)
         assertEquals(true, tip.ok)
+    }
+
+    @Test fun analysisRunsFasterWithTextAndPausesWhileReading() {
+        val searching = analysisIntervalMs(processing = false, showingResult = false, textInView = false)
+        val withText = analysisIntervalMs(processing = false, showingResult = false, textInView = true)
+        assertEquals(true, withText < searching)
+        assertEquals(ANALYSIS_PAUSED, analysisIntervalMs(processing = true, showingResult = false, textInView = true))
+        assertEquals(true, analysisIntervalMs(processing = false, showingResult = true, textInView = true) > searching)
     }
 }
