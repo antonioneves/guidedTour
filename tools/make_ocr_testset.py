@@ -3,7 +3,7 @@
     python3 tools/make_ocr_testset.py OUTPUT_DIR
 
 Needs Pillow and numpy. Push the result to the phone:
-    adb push OUTPUT_DIR/. /sdcard/Android/data/com.guidedtour.app/files/testset/
+    adb push OUTPUT_DIR/. /data/local/tmp/testset/
 These are synthetic: they check the pipeline's handling of tilt, contrast, blur and layout,
 not how it copes with real plaques. Add your own photos for that.
 """
@@ -14,8 +14,15 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-FONT = "/System/Library/Fonts/Supplemental/Georgia.ttf"
-BOLD = "/System/Library/Fonts/Supplemental/Georgia Bold.ttf"
+
+
+def first_existing(*paths):
+    return next((p for p in paths if Path(p).exists()), paths[-1])
+
+
+# Georgia on macOS, DejaVu Serif on Linux (CI).
+FONT = first_existing("/System/Library/Fonts/Supplemental/Georgia.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf")
+BOLD = first_existing("/System/Library/Fonts/Supplemental/Georgia Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf")
 
 PARAGRAPH = [
     "The Parthenon was built between 447 and 432 BC",

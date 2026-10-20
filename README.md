@@ -106,6 +106,9 @@ adb shell am instrument -w -e class com.guidedtour.app.AccuracyTest \
   com.guidedtour.app.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
+`.github/workflows/tests.yml` runs the unit tests and this instrumented test (on an emulator) on
+every push and pull request.
+
 The same test is available in the app under Settings → Developer. Real plaque photos with typed
 transcripts give far more useful numbers than the synthetic set.
 
