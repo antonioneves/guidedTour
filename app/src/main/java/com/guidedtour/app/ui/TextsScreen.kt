@@ -107,23 +107,11 @@ import com.guidedtour.app.data.paragraphsOf
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import kotlinx.coroutines.delay
-import androidx.compose.foundation.background
-import kotlinx.coroutines.flow.distinctUntilChanged
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun TextsScreen(
-    viewModel: TourViewModel,
-    bottomInset: Dp = 0.dp,
-    onOpenSettings: () -> Unit,
-    onOpenQueue: () -> Unit,
-    /** Whether the player is showing in the list, as the playing visit's header (else it floats). */
-    onInlinePlayer: (Boolean) -> Unit,
-) {
+fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings: () -> Unit) {
     val scans by viewModel.scans.collectAsStateWithLifecycle()
     val loaded by viewModel.scansLoaded.collectAsStateWithLifecycle()
     val player by viewModel.player.collectAsStateWithLifecycle()
@@ -149,15 +137,6 @@ fun TextsScreen(
     // Each scan's place, as on the map, so a visit shows the same photo as its pin.
     val placeOf = remember(scans) { groupPlaces(scans).flatMap { place -> place.scans.map { it.id to place } }.toMap() }
     val processing = scanState is ScanState.Processing
-    // The visit being played: its header becomes the player, and sticks at the top while scrolling.
-    val playingVisit = visits.firstOrNull { visit -> visit.scans.any { it.id == player.current?.id } }?.id
-    val currentInline by rememberUpdatedState(onInlinePlayer)
-    LaunchedEffect(playingVisit) {
-        snapshotFlow { playingVisit != null && listState.layoutInfo.visibleItemsInfo.any { it.key == "visit-$playingVisit" } }
-            .distinctUntilChanged()
-            .collect { currentInline(it) }
-    }
-    DisposableEffect(Unit) { onDispose { currentInline(false) } }
 
     fun delete(scan: Scan) {
         viewModel.delete(scan)
@@ -212,12 +191,11 @@ fun TextsScreen(
             EmptyState(Modifier.padding(padding))
         } else {
             LazyColumn(
-                // Below the top bar rather than padded under it, so the playing header sticks beneath it.
-                Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
+                Modifier.fillMaxSize(),
                 state = listState,
                 contentPadding = PaddingValues(
                     // Room for the floating player, so the last card can scroll clear of it.
-                    start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + bottomInset,
+                    start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 8.dp, bottom = 24.dp + bottomInset,
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -246,16 +224,7 @@ fun TextsScreen(
                     }
                 }
                 visits.forEach { visit ->
-                    if (visit.id == playingVisit) {
-                        stickyHeader(key = "visit-${visit.id}") {
-                            // Opaque around the player, so the cards scrolling under it don't show.
-                            Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(top = 8.dp, bottom = 4.dp)) {
-                                NowPlayingBar(player, viewModel, onOpenQueue, inline = true, title = visit.title())
-                            }
-                        }
-                    } else {
-                        item(key = "visit-${visit.id}") { VisitHeader(visit, visit.scans.firstNotNullOfOrNull { placeOf[it.id] }, viewModel, onPlay = { viewModel.playAll(visit.chronological) }) }
-                    }
+                    item(key = "visit-${visit.id}") { VisitHeader(visit, visit.scans.firstNotNullOfOrNull { placeOf[it.id] }, viewModel, onPlay = { viewModel.playAll(visit.chronological) }) }
                     items(visit.scans, key = { it.id }) { scan ->
                         ScanCard(
                             scan, player, scan.id in translating, target, viewModel,
@@ -271,14 +240,9 @@ fun TextsScreen(
 }
 
 @Composable
-private fun Visit.title(): String {
-    val date = day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
-    return place?.let { "$it · $date" } ?: date
-}
-
-@Composable
 private fun VisitHeader(visit: Visit, place: Place?, viewModel: TourViewModel, onPlay: () -> Unit) {
-    val title = visit.title()
+    val day = visit.day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+    val title = visit.place?.let { "$it · $day" } ?: day
     val count = if (visit.scans.size == 1) "1 text" else "${visit.scans.size} texts"
     val photo = rememberPlacePhoto(viewModel, place?.photoSpot())
     if (photo != null) {
