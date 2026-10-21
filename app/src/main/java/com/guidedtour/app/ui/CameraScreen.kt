@@ -24,6 +24,9 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.mlkit.vision.MlKitAnalyzer
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.CameraController
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
@@ -51,6 +54,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.BlurOn
 import androidx.compose.material.icons.outlined.CropFree
@@ -327,6 +331,20 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         }
     }
     DisposableEffect(Unit) { onDispose { analysisExecutor.shutdown() } }
+    // Focus on the text in view, not wherever autofocus settles; a tap to focus still wins for a while.
+    val textFocus = remember { TextFocus(controller) }
+    DisposableEffect(controller, lifecycleOwner) {
+        val observer = androidx.lifecycle.Observer<Int> { if (it == CameraController.TAP_TO_FOCUS_STARTED) textFocus.userTapped() }
+        controller.tapToFocusState.observe(lifecycleOwner, observer)
+        onDispose { controller.tapToFocusState.removeObserver(observer) }
+    }
+    LaunchedEffect(frame, visible, state) {
+        if (visible && state != ScanState.Processing) textFocus.follow(previewView, frame.lines)
+    }
+    // A photo from the gallery is read like a capture.
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) viewModel.importPhoto(uri)
+    }
     // Live analysis only runs while this tab is showing, so it can't capture from behind another tab.
     DisposableEffect(controller, visible, script) {
         if (!visible) {
@@ -391,6 +409,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         if (!visible || !viewModel.beginCapture()) return
         armed = false
         val liveText = frame.text
+        val textLines = frame.lines
         val photos = if (careful) CAREFUL_PHOTOS else 1
         // The frame on screen at the tap shrinks into a card straight away, while the photos are
         // taken in the background; "Hold still…" stays up until the last one is in.
@@ -401,6 +420,8 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         val tapped = SystemClock.elapsedRealtime()
         Log.i(TAG, "capture: tap, $photos photo(s)")
         scope.launch {
+            // Make sure the text is in focus first.
+            textFocus.focusNow(previewView, textLines)
             // Take a few photos in a row; the view model keeps the sharpest and reads it.
             repeat(photos) { i ->
                 val image = takePhoto(controller, ContextCompat.getMainExecutor(context))
@@ -539,7 +560,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         }
         if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
 
-        // The torch on the left of the shutter, auto capture on the right, settings in the corner.
+        // The torch on the left of the shutter, auto capture on the right; the gallery and settings in the corners.
         Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 28.dp)) {
             Row(
                 Modifier.align(Alignment.Center),
@@ -573,6 +594,17 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                     iconAngle = iconAngle,
                 )
             }
+            IconButton(
+                onClick = { pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                enabled = state != ScanState.Processing,
+                modifier = Modifier.align(Alignment.CenterStart).padding(start = 12.dp),
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = Color.Black.copy(alpha = 0.45f),
+                    contentColor = Color.White,
+                    disabledContainerColor = Color.Black.copy(alpha = 0.3f),
+                    disabledContentColor = Color.White.copy(alpha = 0.5f),
+                ),
+            ) { Icon(Icons.Filled.PhotoLibrary, "Read a photo from the gallery", Modifier.rotate(iconAngle)) }
             IconButton(
                 onClick = onOpenSettings,
                 modifier = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp),

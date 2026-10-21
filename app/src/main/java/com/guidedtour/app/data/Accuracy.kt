@@ -47,7 +47,7 @@ object Accuracy {
             report.appendLine("%-24s basic %5.1f%%   improved %5.1f%%   corrected %5.1f%%".format(Locale.US, file.name.take(24), basic * 100, improved * 100, corrected * 100))
             changedWords(reading.text, fixed).forEach { report.appendLine("    $it") }
             // What was read, when it went wrong, to see how.
-            if (corrected > 0.02) report.appendLine("    read: " + fixed.replace(Regex("\\s+"), " ").take(400))
+            if (corrected > 0.02) report.appendLine("    read: " + fixed.replace(Regex("\\s+"), " ").take(1200))
             File(dir, file.nameWithoutExtension + ".lang").takeIf { it.exists() }?.let { expectedFile ->
                 val expected = expectedFile.readText().trim().split(',').map { it.trim() }
                 val found = spans.map { it.tag }
@@ -78,7 +78,7 @@ object Accuracy {
             ExifInterface.ORIENTATION_ROTATE_270 -> 270f
             else -> 0f
         }
-        val scale = min(1f, 2600f / maxOf(raw.width, raw.height))
+        val scale = min(1f, Recognizer.FULL_SIDE.toFloat() / maxOf(raw.width, raw.height))
         if (turn == 0f && scale == 1f) raw
         else Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, Matrix().apply { postRotate(turn); postScale(scale, scale) }, true)
     }

@@ -133,7 +133,9 @@ private fun near(a: OcrBlock, b: OcrBlock): Boolean {
     val line = max(a.medianLineHeight, b.medianLineHeight)
     val dx = max(0, max(a.left, b.left) - min(a.right, b.right))
     val dy = max(0, max(a.top, b.top) - min(a.bottom, b.bottom))
-    return dx <= 2.5 * line && dy <= 3 * line
+    // A plaque's parts stacked one above another can be further apart (a caution below the steps)
+    // than a neighbouring plaque is beside it.
+    return dx <= 2.5 * line && dy <= 5 * line
 }
 
 private fun groupScore(group: List<OcrBlock>, width: Int, height: Int): Double {

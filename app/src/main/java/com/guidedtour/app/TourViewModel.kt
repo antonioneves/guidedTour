@@ -2,13 +2,16 @@ package com.guidedtour.app
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.camera.core.ImageProxy
+import androidx.core.graphics.scale
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.guidedtour.app.data.AppDatabase
 import com.guidedtour.app.data.Accuracy
 import com.guidedtour.app.data.CloudOcr
 import com.guidedtour.app.data.WordLists
+import com.guidedtour.app.data.readPickedPhoto
 import com.guidedtour.app.data.Locator
 import com.guidedtour.app.data.PhotoSpot
 import com.guidedtour.app.data.PlacePhotos
@@ -47,6 +50,12 @@ sealed interface ScanState {
     data object NoText : ScanState
     data class Done(val scan: Scan) : ScanState
 }
+
+/** Longest side of the photo saved with a scan. */
+private const val SAVED_PHOTO_SIDE = 2400
+
+/** A picked photo taken this recently is placed where the phone is now. */
+private const val RECENT_PHOTO_MS = 2 * 60 * 60 * 1000L
 
 class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     private val dao = AppDatabase.build(app).scanDao()
@@ -140,15 +149,50 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Saves and plays a scan of [read]; words in [unsure] that aren't real words in its language are corrected first. */
-    private suspend fun persist(read: String, photo: Bitmap?, unsure: Set<String>) {
+    /**
+     * Reads a photo picked from the phone's gallery and saves it like a scan, dated when it was taken.
+     * It's placed where the photo says it was taken, or else here if it was taken in the last couple
+     * of hours (an older photo was likely taken somewhere else).
+     */
+    fun importPhoto(uri: Uri) {
+        if (!beginCapture()) return
+        viewModelScope.launch {
+            val picked = withContext(Dispatchers.IO) { readPickedPhoto(app, uri) }
+            if (picked == null) {
+                _state.value = ScanState.Idle
+                _messages.tryEmit("Couldn't open that photo")
+                return@launch
+            }
+            val reading = Recognizer.read(picked.bitmap, settings.script.value)
+            val photo = if (reading.turn == 0) picked.bitmap else withContext(Dispatchers.Default) {
+                Bitmap.createBitmap(picked.bitmap, 0, 0, picked.bitmap.width, picked.bitmap.height, android.graphics.Matrix().apply { postRotate(reading.turn.toFloat()) }, true)
+            }
+            val recent = picked.taken == null || System.currentTimeMillis() - picked.taken < RECENT_PHOTO_MS
+            val position = if (picked.latitude != null && picked.longitude != null) picked.latitude to picked.longitude else null
+            persist(reading.text, photo, reading.unsure, taken = picked.taken, position = position, here = position == null && recent)
+        }
+    }
+
+    /**
+     * Saves and plays a scan of [read]; words in [unsure] that aren't real words in its language are
+     * corrected first. It's dated [taken] (now if null) and placed at [position], or else where the
+     * phone is now if [here].
+     */
+    private suspend fun persist(
+        read: String,
+        photo: Bitmap?,
+        unsure: Set<String>,
+        taken: Long? = null,
+        position: Pair<Double, Double>? = null,
+        here: Boolean = true,
+    ) {
         android.util.Log.i("GuidedTour", "capture: read ${read.length} characters")
         if (read.isBlank()) {
             _state.value = ScanState.NoText
             return
         }
-        val location = locator.current()
-        val spot = location?.let { locator.spot(it.latitude, it.longitude) }
+        val location = position ?: if (here) locator.current()?.let { it.latitude to it.longitude } else null
+        val spot = location?.let { locator.spot(it.first, it.second) }
         var spans = Recognizer.detectLanguages(read, spot?.countryCode)
         val text = if (settings.correctWords.value) withContext(Dispatchers.Default) { wordLists.correct(read, spans, unsure) } else read
         // Corrected words change where each language starts, and may make it clearer.
@@ -156,9 +200,9 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         val now = System.currentTimeMillis()
         val scan = Scan(
             text = text,
-            timestamp = now,
-            latitude = location?.latitude,
-            longitude = location?.longitude,
+            timestamp = taken ?: now,
+            latitude = location?.first,
+            longitude = location?.second,
             placeName = spot?.name,
             languageTag = mainLanguage(text, spans),
             languages = encodeSpans(spans),
@@ -172,10 +216,11 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
 
     private suspend fun saveThumbnail(photo: Bitmap, timestamp: Long): String? = withContext(Dispatchers.IO) {
         runCatching {
-            val scale = 1280f / maxOf(photo.width, photo.height)
-            val small = if (scale < 1f) Bitmap.createScaledBitmap(photo, (photo.width * scale).toInt(), (photo.height * scale).toInt(), true) else photo
+            // Shrunk only now the text has been read: sharp enough to zoom into and read again in the cloud.
+            val scale = SAVED_PHOTO_SIDE.toFloat() / maxOf(photo.width, photo.height)
+            val small = if (scale < 1f) photo.scale((photo.width * scale).toInt(), (photo.height * scale).toInt()) else photo
             val dir = File(app.filesDir, "thumbs").apply { mkdirs() }
-            File(dir, "$timestamp.jpg").also { file -> file.outputStream().use { small.compress(Bitmap.CompressFormat.JPEG, 85, it) } }.absolutePath
+            File(dir, "$timestamp.jpg").also { file -> file.outputStream().use { small.compress(Bitmap.CompressFormat.JPEG, 90, it) } }.absolutePath
         }.getOrNull()
     }
 

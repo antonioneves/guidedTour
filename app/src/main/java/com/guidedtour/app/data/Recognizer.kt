@@ -50,7 +50,16 @@ private class Pass(val script: OcrScript, val blocks: List<OcrBlock>, val width:
 
 /** On-device OCR in several scripts, plus language detection so speech uses the right voice. */
 object Recognizer {
-    /** Longest side of the photo we keep: plenty for OCR, and small enough to avoid running out of memory. */
+    /**
+     * Longest side of a photo we keep: a phone's main camera at full resolution (4000 × 3000 on a
+     * Pixel 9a), with a cap so a 50 MP photo doesn't run out of memory.
+     */
+    const val FULL_SIDE = 4096
+
+    /** Longest side of the copy the text is first looked for on: quick, and plenty to see where it is. */
+    private const val OVERVIEW_SIDE = 2600
+
+    /** Longest side of an image handed to ML Kit for reading: more only slows it down. */
     private const val MAX_SIDE = 2600
 
     /** Lines this many pixels tall read reliably; smaller ones are enlarged towards it in the second pass. */
@@ -73,13 +82,13 @@ object Recognizer {
         }
     }
 
-    /** Converts a camera photo to an upright bitmap (at most [MAX_SIDE] on its long side). Always closes [image]. */
+    /** Converts a camera photo to an upright bitmap (at most [FULL_SIDE] on its long side). Always closes [image]. */
     suspend fun toUprightBitmap(image: ImageProxy): Bitmap = try {
         withContext(Dispatchers.Default) {
             val raw = image.toBitmap()
             val matrix = Matrix().apply {
                 postRotate(image.imageInfo.rotationDegrees.toFloat())
-                val scale = MAX_SIDE.toFloat() / max(raw.width, raw.height)
+                val scale = FULL_SIDE.toFloat() / max(raw.width, raw.height)
                 if (scale < 1f) postScale(scale, scale)
             }
             if (matrix.isIdentity) raw else Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
@@ -89,22 +98,25 @@ object Recognizer {
     }
 
     /**
-     * Reads [bitmap]. With [enhance], a second pass straightens tilted text, crops to the text and boosts
-     * contrast; whichever pass looks more reliable wins.
+     * Reads [photo], which isn't changed. The text is first looked for on a smaller copy; with
+     * [enhance], only the area it's in is then read again from the full-resolution photo (sharper, and
+     * no time spent on the rest), and a second pass straightens it, enlarges small letters and boosts
+     * contrast. Whichever reading looks more reliable wins.
      */
-    suspend fun read(bitmap: Bitmap, script: OcrScript, enhance: Boolean = true): Reading {
-        var source = bitmap
+    suspend fun read(photo: Bitmap, script: OcrScript, enhance: Boolean = true): Reading {
+        val overview = withContext(Dispatchers.Default) { shrunk(photo, OVERVIEW_SIDE) }
+        var source = overview
         var turn = 0
-        var first = firstPass(bitmap, script)
+        var first = firstPass(overview, script)
         // Sideways text (the phone turned while the screen stayed upright, or a plaque mounted on its
         // side) reads poorly: if this one did, try a quarter turn each way and keep the best.
         if (enhance && (looksSideways(first.blocks) || looksWeak(first.reading))) {
             for (degrees in listOf(90, 270)) {
-                val turned = withContext(Dispatchers.Default) { rotated(bitmap, degrees.toFloat()) }
+                val turned = withContext(Dispatchers.Default) { rotated(overview, degrees.toFloat()) }
                 val pass = firstPass(turned, script)
                 // ML Kit reads sideways text too, so a turn only wins if it lays the lines down flat.
                 if (!looksSideways(pass.blocks) && isBetter(pass.reading, first.reading)) {
-                    if (source !== bitmap) source.recycle()
+                    if (source !== overview) source.recycle()
                     source = turned
                     turn = degrees
                     first = pass
@@ -114,15 +126,60 @@ object Recognizer {
             }
         }
         var best = first.reading
-        if (enhance && first.blocks.isNotEmpty()) {
+        if (enhance && first.kept.isNotEmpty()) {
+            if (photo !== overview) {
+                // The text area again, from the full photo.
+                val scale = max(photo.width, photo.height).toFloat() / max(overview.width, overview.height)
+                // Around all the text seen, not just the main plaque's: the pass on the detail sorts that out again.
+                val detail = withContext(Dispatchers.Default) { textArea(photo, turn, first.blocks, scale) }
+                val pass = Pass(first.script, recognize(client(first.script), detail), detail.width, detail.height)
+                if (pass.kept.isNotEmpty() && pass.reading.letters >= first.reading.letters * 0.9) {
+                    if (source !== overview) source.recycle()
+                    source = detail
+                    first = pass
+                    best = pass.reading
+                } else {
+                    detail.recycle()
+                }
+            }
             // Straighten or crop around the kept text only, so neighbouring plaques fall outside.
             val improved = withContext(Dispatchers.Default) { enhanced(source, first.kept) }
             val second = Pass(first.script, recognize(client(first.script), improved), improved.width, improved.height).reading
             improved.recycle()
             if (isBetter(second, best)) best = second
         }
-        if (source !== bitmap) source.recycle()
+        if (source !== overview) source.recycle()
+        if (overview !== photo) overview.recycle()
         return Reading(best.text, best.confidence, best.letters, turn, best.unsure)
+    }
+
+    /** [bitmap] scaled down to [side] on its long side, or itself if it's no bigger. */
+    private fun shrunk(bitmap: Bitmap, side: Int): Bitmap {
+        val scale = side.toFloat() / max(bitmap.width, bitmap.height)
+        return if (scale >= 1f) bitmap else bitmap.scale((bitmap.width * scale).toInt(), (bitmap.height * scale).toInt())
+    }
+
+    /**
+     * The area of [photo] that [blocks] (found on a copy [scale] times smaller, turned [turn] degrees)
+     * cover, with a margin, from the full-resolution photo: at most [MAX_SIDE] on its long side.
+     */
+    private fun textArea(photo: Bitmap, turn: Int, blocks: List<OcrBlock>, scale: Float): Bitmap {
+        val upright = if (turn == 0) photo else rotated(photo, turn.toFloat())
+        val left0 = blocks.minOf { it.left }
+        val top0 = blocks.minOf { it.top }
+        val right0 = blocks.maxOf { it.right }
+        val bottom0 = blocks.maxOf { it.bottom }
+        // A wide margin: small print set apart (a caution, a credit) may have been missed on the small copy.
+        val line = blocks.maxOf { it.medianLineHeight }
+        val marginX = max(2 * line, (right0 - left0) / 4)
+        val marginY = max(2 * line, (bottom0 - top0) / 4)
+        val left = max(0, ((left0 - marginX) * scale).toInt())
+        val top = max(0, ((top0 - marginY) * scale).toInt())
+        val right = min(upright.width, ((right0 + marginX) * scale).toInt())
+        val bottom = min(upright.height, ((bottom0 + marginY) * scale).toInt())
+        val area = Bitmap.createBitmap(upright, left, top, max(1, right - left), max(1, bottom - top))
+        if (upright !== photo && area !== upright) upright.recycle()
+        return shrunk(area, MAX_SIDE).also { if (it !== area && area !== photo) area.recycle() }
     }
 
     /** Most lines of three or more characters are taller than wide: the text is lying on its side. */
