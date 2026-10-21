@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -505,47 +506,48 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             }
         }
 
-        IconButton(
-            onClick = onOpenSettings,
-            modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp),
-            colors = IconButtonDefaults.iconButtonColors(containerColor = Color.Black.copy(alpha = 0.45f), contentColor = Color.White),
-        ) { Icon(Icons.Filled.Settings, "Settings", Modifier.rotate(iconAngle)) }
-
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp))
         if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
 
-        // The torch on the left of the shutter, auto capture on the right.
-        Row(
-            Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp),
-            horizontalArrangement = Arrangement.spacedBy(28.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (hasFlash) {
+        // The torch on the left of the shutter, auto capture on the right, settings in the corner.
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 28.dp)) {
+            Row(
+                Modifier.align(Alignment.Center),
+                horizontalArrangement = Arrangement.spacedBy(28.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (hasFlash) {
+                    CameraToggle(
+                        checked = torch,
+                        onToggle = ::toggleTorch,
+                        icon = if (torch) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff,
+                        label = "Torch",
+                        iconAngle = iconAngle,
+                    )
+                } else {
+                    // Keeps the shutter centred.
+                    Spacer(Modifier.size(CAMERA_TOGGLE_SIZE))
+                }
+                if (state == ScanState.Processing) {
+                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.size(92.dp)) {
+                        Box(contentAlignment = Alignment.Center) { LoadingIndicator() }
+                    }
+                } else {
+                    Shutter(progress = countdown.value, iconAngle = iconAngle, onClick = ::capture)
+                }
                 CameraToggle(
-                    checked = torch,
-                    onToggle = ::toggleTorch,
-                    icon = if (torch) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff,
-                    label = "Torch",
+                    checked = autoCapture,
+                    onToggle = ::toggleAutoCapture,
+                    icon = Icons.Filled.AutoMode,
+                    label = "Auto capture",
                     iconAngle = iconAngle,
                 )
-            } else {
-                // Keeps the shutter centred.
-                Spacer(Modifier.size(CAMERA_TOGGLE_SIZE))
             }
-            if (state == ScanState.Processing) {
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.size(92.dp)) {
-                    Box(contentAlignment = Alignment.Center) { LoadingIndicator() }
-                }
-            } else {
-                Shutter(progress = countdown.value, iconAngle = iconAngle, onClick = ::capture)
-            }
-            CameraToggle(
-                checked = autoCapture,
-                onToggle = ::toggleAutoCapture,
-                icon = Icons.Filled.AutoMode,
-                label = "Auto capture",
-                iconAngle = iconAngle,
-            )
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp),
+                colors = IconButtonDefaults.iconButtonColors(containerColor = Color.Black.copy(alpha = 0.45f), contentColor = Color.White),
+            ) { Icon(Icons.Filled.Settings, "Settings", Modifier.rotate(iconAngle)) }
         }
     }
 }
