@@ -1,5 +1,17 @@
 package com.guidedtour.app.ui
 
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
@@ -233,7 +245,12 @@ fun MapScreen(viewModel: TourViewModel) {
                 // there; its button plays the place's texts and shows whether they are playing.
                 // Space below the last row lets any row scroll to the top of the lowered sheet when its pin is tapped.
                 val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-                LazyColumn(Modifier.fillMaxWidth(), state = listState, contentPadding = PaddingValues(bottom = screenHeight)) {
+                LazyColumn(
+                    Modifier.fillMaxWidth(),
+                    state = listState,
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = screenHeight),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     items(listed, key = { it.scans.first().id }) { place ->
                         PlaceRow(
                             place,
@@ -315,30 +332,46 @@ fun MapScreen(viewModel: TourViewModel) {
     }
 }
 
+/**
+ * A place visited, as a card with the place's photo behind it (darkened under white text), or a plain
+ * card without one. The place being read, or whose pin was tapped, is outlined.
+ */
 @Composable
 private fun PlaceRow(place: Place, player: PlayerState, viewModel: TourViewModel, highlighted: Boolean, onClick: () -> Unit, onPlay: () -> Unit) {
     val first = place.scans.first()
     val active = player.current?.id in place.scans.map { it.id }
     val playing = active && player.playing
-    val background = when {
-        active -> MaterialTheme.colorScheme.primaryContainer
-        highlighted -> MaterialTheme.colorScheme.secondaryContainer
-        else -> Color.Transparent
-    }
-    // A tapped pin's row opens with a photo of the place above it.
-    val photo = if (highlighted) rememberPlacePhoto(viewModel, place.photoSpot()) else null
-    Column(Modifier.fillMaxWidth().background(background).animateContentSize()) {
-        if (photo != null) PlacePhotoBanner(photo, Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), height = 140.dp)
-        PlaceRowContent(place, first, playing, active, onClick, onPlay)
+    val photo = rememberPlacePhoto(viewModel, place.photoSpot())
+    val colors = MaterialTheme.colorScheme
+    ElevatedCard(
+        onClick = onClick,
+        colors = CardDefaults.elevatedCardColors(containerColor = if (active && photo == null) colors.primaryContainer else colors.surfaceContainerLow),
+        modifier = Modifier.fillMaxWidth()
+            .then(if (active || highlighted) Modifier.border(3.dp, colors.primary, CardDefaults.elevatedShape) else Modifier)
+            .semantics { onClick(label = "Show on the map") { onClick(); true } },
+    ) {
+        Box(Modifier.height(IntrinsicSize.Min)) {
+            if (photo != null) {
+                Image(photo.image, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+                Box(
+                    Modifier.matchParentSize().background(
+                        Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.35f), 1f to Color.Black.copy(alpha = 0.7f)),
+                    ),
+                )
+            }
+            CompositionLocalProvider(LocalContentColor provides if (photo != null) Color.White else LocalContentColor.current) {
+                PlaceRowContent(place, first, playing, active, onPlay, onPhoto = photo != null)
+            }
+        }
     }
 }
 
 @Composable
-private fun PlaceRowContent(place: Place, first: Scan, playing: Boolean, active: Boolean, onClick: () -> Unit, onPlay: () -> Unit) {
+private fun PlaceRowContent(place: Place, first: Scan, playing: Boolean, active: Boolean, onPlay: () -> Unit, onPhoto: Boolean) {
     // Pin (or count) with the time below it, then the place and its text, then play centred.
+    val secondary = if (onPhoto) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurfaceVariant
     Row(
-        Modifier.fillMaxWidth().clickable(onClickLabel = "Show on the map", onClick = onClick)
-            .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+        Modifier.fillMaxWidth().heightIn(min = if (onPhoto) 112.dp else 0.dp).padding(start = 8.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.width(64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -354,18 +387,18 @@ private fun PlaceRowContent(place: Place, first: Scan, playing: Boolean, active:
             Text(
                 place.scans.last().shortTimeLabel(),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = secondary,
                 textAlign = TextAlign.Center,
                 maxLines = 2,
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+        Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
             Text(first.placeLabel(), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 if (place.scans.size == 1) first.text else "${place.scans.size} texts",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = secondary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
