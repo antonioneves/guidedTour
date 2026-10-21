@@ -6,8 +6,8 @@ import android.hardware.camera2.CameraCharacteristics
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.FilledIconToggleButton
-import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.FlashOff
+import androidx.compose.material.icons.filled.FlashlightOn
+import androidx.compose.material.icons.filled.FlashlightOff
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Matrix
@@ -359,7 +359,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         }
     }
 
-    // The flash is a steady light, so it lights every photo of the burst and the live text outline.
+    // The torch is a steady light rather than a flash, so it lights every photo of the burst and the live text outline.
     LaunchedEffect(torch, visible) { controller.enableTorch(torch && visible) }
     LaunchedEffect(visible) { if (!visible) torch = false }
 
@@ -368,7 +368,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         snackbar.currentSnackbarData?.dismiss()
         if (torch) scope.launch {
             val result = snackbar.showSnackbar(
-                "Flash on. Many museums don't allow it, as it can harm artworks. Check before using it.",
+                "Torch on. Many museums don't allow it, as it can harm artworks. Check before using it.",
                 actionLabel = "Turn off",
                 duration = SnackbarDuration.Long,
             )
@@ -514,7 +514,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp))
         if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
 
-        // The flash on the left of the shutter, auto capture on the right.
+        // The torch on the left of the shutter, auto capture on the right.
         Row(
             Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp),
             horizontalArrangement = Arrangement.spacedBy(28.dp),
@@ -524,8 +524,8 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                 CameraToggle(
                     checked = torch,
                     onToggle = ::toggleTorch,
-                    icon = if (torch) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
-                    label = "Flash",
+                    icon = if (torch) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff,
+                    label = "Torch",
                     iconAngle = iconAngle,
                 )
             } else {
@@ -621,7 +621,7 @@ private fun CameraToggle(checked: Boolean, onToggle: () -> Unit, icon: ImageVect
     ) { Icon(icon, label, Modifier.rotate(iconAngle)) }
 }
 
-/** Whether the back camera has a flash that can stay on as a light. */
+/** Whether the back camera has a flash that can stay on as a torch. */
 private fun hasFlashUnit(context: android.content.Context): Boolean = runCatching {
     val manager = context.getSystemService(CameraManager::class.java)
     manager.cameraIdList.any { id ->
