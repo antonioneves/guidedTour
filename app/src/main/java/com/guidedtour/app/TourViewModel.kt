@@ -133,18 +133,23 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Reads the sharpest photo, only inside [aimed] (the text block outlined in the preview) if given;
-     * if that finds nothing, falls back to [liveText] seen in the preview.
+     * Reads the sharpest photo, only inside [aimed] (the text block outlined in the preview) if given,
+     * or else only what the preview showed ([shown], the whole preview); if that finds nothing, falls
+     * back to [liveText] seen in the preview. The photo is saved as the preview showed it: the camera
+     * takes in more at the sides (or top and bottom) than a phone screen shows.
      */
-    fun finishCapture(liveText: String, aimed: ViewArea? = null) {
-        val frame = bestFrame
+    fun finishCapture(liveText: String, aimed: ViewArea? = null, shown: ViewArea? = null) {
+        val taken = bestFrame
         bestFrame = null
         bestSharpness = -1.0
         viewModelScope.launch {
-            if (frame == null) {
+            if (taken == null) {
                 persist(liveText, null, emptySet())
             } else {
-                // Only the text block that was outlined in the preview, when it maps onto the photo.
+                val visible = shown?.let { photoRegion(it, taken.width, taken.height, margin = 0f) }
+                val frame = if (visible == null) taken else withContext(Dispatchers.Default) { Recognizer.cropped(taken, visible) }
+                // Only the text block that was outlined in the preview (cropped like the preview, the
+                // photo now matches it exactly).
                 val region = aimed?.let { photoRegion(it, frame.width, frame.height) }
                 val reading = Recognizer.read(frame, settings.script.value, region = region)
                 // Save the photo the way the text reads, if it had to be turned.
@@ -152,6 +157,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
                     Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, android.graphics.Matrix().apply { postRotate(reading.turn.toFloat()) }, true)
                 }
                 if (reading.text.isBlank()) persist(liveText, photo, emptySet()) else persist(reading.text, photo, reading.unsure)
+                if (frame !== taken) taken.recycle()
             }
         }
     }

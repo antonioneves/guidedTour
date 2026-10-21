@@ -107,18 +107,21 @@ object Recognizer {
     suspend fun read(photo: Bitmap, script: OcrScript, enhance: Boolean = true, region: PhotoRegion? = null): Reading {
         if (region == null) return readAll(photo, script, enhance)
         // Only the text block that was aimed at: text around it is left out from the start.
-        val aimed = withContext(Dispatchers.Default) {
-            val left = (region.left * photo.width).toInt().coerceIn(0, photo.width - 1)
-            val top = (region.top * photo.height).toInt().coerceIn(0, photo.height - 1)
-            val right = (region.right * photo.width).toInt().coerceIn(left + 1, photo.width)
-            val bottom = (region.bottom * photo.height).toInt().coerceIn(top + 1, photo.height)
-            Bitmap.createBitmap(photo, left, top, right - left, bottom - top)
-        }
+        val aimed = withContext(Dispatchers.Default) { cropped(photo, region) }
         return try {
             readAll(aimed, script, enhance)
         } finally {
             if (aimed !== photo) aimed.recycle()
         }
+    }
+
+    /** The [region] of [photo]; [photo] itself if that's all of it. */
+    fun cropped(photo: Bitmap, region: PhotoRegion): Bitmap {
+        val left = (region.left * photo.width).toInt().coerceIn(0, photo.width - 1)
+        val top = (region.top * photo.height).toInt().coerceIn(0, photo.height - 1)
+        val right = (region.right * photo.width).toInt().coerceIn(left + 1, photo.width)
+        val bottom = (region.bottom * photo.height).toInt().coerceIn(top + 1, photo.height)
+        return Bitmap.createBitmap(photo, left, top, right - left, bottom - top)
     }
 
     private suspend fun readAll(photo: Bitmap, script: OcrScript, enhance: Boolean): Reading {
@@ -152,12 +155,12 @@ object Recognizer {
                 val detail = withContext(Dispatchers.Default) { textArea(photo, turn, first.blocks, scale) }
                 val pass = Pass(first.script, recognize(client(first.script), detail), detail.width, detail.height)
                 if (pass.kept.isNotEmpty() && pass.reading.letters >= first.reading.letters * 0.9) {
-                    if (source !== overview) source.recycle()
+                    if (source !== overview && source !== photo) source.recycle()
                     source = detail
                     first = pass
                     best = pass.reading
                 } else {
-                    detail.recycle()
+                    if (detail !== photo) detail.recycle()
                 }
             }
             // Straighten or crop around the kept text only, so neighbouring plaques fall outside.
@@ -166,7 +169,7 @@ object Recognizer {
             improved.recycle()
             if (isBetter(second, best)) best = second
         }
-        if (source !== overview) source.recycle()
+        if (source !== overview && source !== photo) source.recycle()
         if (overview !== photo) overview.recycle()
         return Reading(best.text, best.confidence, best.letters, turn, best.unsure)
     }

@@ -495,7 +495,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                 Log.i(TAG, "capture: photo ${i + 1} ${if (image != null) "taken" else "failed"} at ${SystemClock.elapsedRealtime() - tapped} ms")
                 if (image != null) viewModel.addFrame(image)
             }
-            viewModel.finishCapture(liveText, aimed)
+            viewModel.finishCapture(liveText, aimed, ViewArea(0f, 0f, viewSize.width.toFloat(), viewSize.height.toFloat(), viewSize.width, viewSize.height))
             // Keep "Hold still…" up for a moment even when the photos were quick, so it can be read.
             delay((MIN_HOLD_STILL_MS - (SystemClock.elapsedRealtime() - tapped)).coerceAtLeast(0))
             photosTaken = true
