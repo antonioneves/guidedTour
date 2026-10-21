@@ -8,11 +8,16 @@ scanned, and reads it aloud, also with the screen off.
 
 - **Scan**: live text recognition with tips for a better photo (too dark, too small, cut off,
   shaky, glare). Text photographed at an angle, from the side or below, is stretched back square,
-  and sideways or tilted text is turned upright. Capture with the shutter button or the volume key, or let it capture
+  and sideways or tilted text is turned upright. The camera focuses on the text, and photos are
+  read at full resolution (only the text area, found first on a smaller copy). Lens chips switch
+  between the phone's cameras (ultra-wide, main, 2×, front), and night mode where the phone offers
+  it. Capture with the shutter button or the volume key, or let it capture
   automatically once the text looks readable. Optionally takes three photos and keeps the sharpest.
 - **Correct misread words**: words the camera wasn't sure of, and that aren't real words in their
   paragraph's language, are replaced by the likeliest common word one OCR slip away ("tcmple" →
   "temple", "construido" → "construído"). Uses word lists on the phone for about 30 languages.
+- **From the gallery**: the button left of the shutter reads a photo already on the phone, dated
+  when it was taken.
 - **Read aloud**: sentence by sentence, with the current word highlighted. Plays in the
   background with lock-screen and headphone controls, and pauses other audio while reading.
   Speed, pitch and voice (per language) are adjustable.

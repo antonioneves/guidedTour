@@ -20,6 +20,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
@@ -53,6 +54,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoMode
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
@@ -83,9 +86,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -109,6 +115,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
@@ -124,7 +131,9 @@ import com.guidedtour.app.data.Recognizer
 import com.guidedtour.app.data.cleanOcr
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.abs
 import kotlin.math.sqrt
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -341,9 +350,49 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
     LaunchedEffect(frame, visible, state) {
         if (visible && state != ScanState.Processing) textFocus.follow(previewView, frame.lines)
     }
+    // The lenses the phone has (wide, main, zoom, front) and its night mode, as chips over the shutter.
+    val choices by produceState<CameraChoices?>(null) { value = cameraChoices(context) }
+    var lensKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var night by rememberSaveable { mutableStateOf(false) }
+    val lens = choices?.let { c -> c.lenses.firstOrNull { key(it) == lensKey } ?: c.main }
+    val nightOn = night && lens?.night == true
+    // Without live detection in night mode there are no tips or automatic capture, only the shutter.
+    val liveOff = nightOn && lens?.nightLive != true
+    var zoom by remember { mutableFloatStateOf(1f) }
+    DisposableEffect(controller, lifecycleOwner) {
+        val observer = androidx.lifecycle.Observer<androidx.camera.core.ZoomState> { zoom = it.zoomRatio }
+        controller.zoomState.observe(lifecycleOwner, observer)
+        onDispose { controller.zoomState.removeObserver(observer) }
+    }
+    LaunchedEffect(choices, lens, nightOn) {
+        val c = choices ?: return@LaunchedEffect
+        val chosen = lens ?: return@LaunchedEffect
+        val selector = (if (nightOn) c.nightSelector(chosen) else null) ?: chosen.selector
+        val cases = if (liveOff) CameraController.IMAGE_CAPTURE else CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE
+        if (liveOff) frame = EMPTY_FRAME
+        runCatching {
+            controller.setEnabledUseCases(cases)
+            if (controller.cameraSelector != selector) controller.cameraSelector = selector
+        }.onFailure { Log.w(TAG, "camera: can't switch to ${chosen.label}", it) }
+        // The zoom applies to the camera once it's open.
+        repeat(40) {
+            val info = controller.cameraInfo
+            val facing = if (chosen.front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+            if (info != null && info.lensFacing == facing && controller.zoomState.value != null) {
+                controller.setZoomRatio(chosen.zoom)
+                return@LaunchedEffect
+            }
+            delay(50)
+        }
+    }
+
     // A photo from the gallery is read like a capture.
     val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) viewModel.importPhoto(uri)
+        if (uri != null) {
+            // Nothing to hold still for: straight to "Reading the text…".
+            photosTaken = true
+            viewModel.importPhoto(uri)
+        }
     }
     // Live analysis only runs while this tab is showing, so it can't capture from behind another tab.
     DisposableEffect(controller, visible, script) {
@@ -410,7 +459,8 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         armed = false
         val liveText = frame.text
         val textLines = frame.lines
-        val photos = if (careful) CAREFUL_PHOTOS else 1
+        // Night mode already merges several frames into each photo, slowly: one is enough.
+        val photos = if (careful && !nightOn) CAREFUL_PHOTOS else 1
         // The frame on screen at the tap shrinks into a card straight away, while the photos are
         // taken in the background; "Hold still…" stays up until the last one is in.
         photosTaken = false
@@ -531,7 +581,9 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             }
         }
 
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp)) { data ->
+        // Above the lens bar, when there is one.
+        val lensBar = choices?.let { it.lenses.size > 1 || it.lenses.any { l -> l.night } } == true
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (lensBar) 200.dp else 140.dp)) { data ->
             // A pill like the one at the top, with any action ("Turn off") inside it.
             Surface(
                 shape = CircleShape,
@@ -559,6 +611,31 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             }
         }
         if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
+
+        choices?.takeIf { lensBar }?.let { c ->
+            LensBar(
+                lenses = c.lenses,
+                selected = lens,
+                zoom = zoom,
+                night = nightOn,
+                onSelect = { lensKey = key(it) },
+                onNight = {
+                    night = !night
+                    snackbar.currentSnackbarData?.dismiss()
+                    scope.launch {
+                        snackbar.showSnackbar(
+                            when {
+                                !night -> "Night mode off"
+                                lens?.nightLive == true -> "Night mode on: brighter, slower photos"
+                                else -> "Night mode on: brighter, slower photos. Tips and auto capture pause."
+                            }
+                        )
+                    }
+                },
+                iconAngle = iconAngle,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp + 92.dp + 16.dp),
+            )
+        }
 
         // The torch on the left of the shutter, auto capture on the right; the gallery and settings in the corners.
         Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 28.dp)) {
@@ -683,6 +760,65 @@ private fun CameraToggle(checked: Boolean, onToggle: () -> Unit, icon: ImageVect
             checkedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         ),
     ) { Icon(icon, label, Modifier.rotate(iconAngle)) }
+}
+
+/** What identifies a lens across recompositions and restarts. */
+private fun key(lens: Lens) = (if (lens.front) "front " else "back ") + lens.label
+
+/**
+ * The lenses as chips, like a camera app's: the chosen one in white, showing the actual zoom when
+ * pinched to another; the front camera as an icon; and night mode, where the chosen lens has it.
+ */
+@Composable
+private fun LensBar(
+    lenses: List<Lens>,
+    selected: Lens?,
+    zoom: Float,
+    night: Boolean,
+    onSelect: (Lens) -> Unit,
+    onNight: () -> Unit,
+    iconAngle: Float,
+    modifier: Modifier = Modifier,
+) {
+    Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.45f), contentColor = Color.White, modifier = modifier) {
+        Row(Modifier.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (selected?.night == true) {
+                LensChip(selected = night, onClick = onNight, description = if (night) "Night mode on" else "Night mode off") {
+                    Icon(Icons.Filled.Bedtime, null, Modifier.size(18.dp).rotate(iconAngle))
+                }
+            }
+            lenses.forEach { lens ->
+                val chosen = lens == selected
+                LensChip(
+                    selected = chosen,
+                    onClick = { onSelect(lens) },
+                    description = if (lens.front) "Front camera" else "Lens ${lens.label}",
+                ) {
+                    if (lens.front) {
+                        Icon(Icons.Filled.Cameraswitch, null, Modifier.size(18.dp).rotate(iconAngle))
+                    } else {
+                        // Pinched away from the chip's zoom: show where it is now.
+                        val shown = if (chosen && abs(zoom - lens.zoom) > 0.05f) String.format(Locale.US, "%.1f×", zoom) else lens.label
+                        Text(shown, style = MaterialTheme.typography.labelMedium, modifier = Modifier.rotate(iconAngle))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LensChip(selected: Boolean, onClick: () -> Unit, description: String, content: @Composable () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = if (selected) Color.White else Color.Transparent,
+        contentColor = if (selected) Color.Black else Color.White,
+        modifier = Modifier.size(44.dp).semantics {
+            contentDescription = description
+            this.selected = selected
+        },
+    ) { Box(contentAlignment = Alignment.Center) { content() } }
 }
 
 /** Whether the back camera has a flash that can stay on as a torch. */
