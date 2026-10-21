@@ -144,5 +144,12 @@ Guided Tour is free software: you can redistribute it and/or modify it under the
 GNU General Public License as published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version. See [LICENSE](LICENSE) for the full text.
 
+### Additional permission under GNU GPL version 3 section 7
+
+If you modify this program, or any covered work, by linking or combining it with Google Play
+services (`com.google.android.gms`) or Google ML Kit (`com.google.mlkit`), or a modified version of
+those libraries, containing parts covered by the terms of their license agreements, the licensors
+of this program grant you additional permission to convey the resulting work.
+
 The libraries and services it uses keep their own licenses; they are listed in the app under
 Settings → Credits.
