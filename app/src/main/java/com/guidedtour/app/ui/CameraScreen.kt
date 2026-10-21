@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -509,12 +510,13 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp))
         if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
 
-        // The torch on the left of the shutter, auto capture on the right, settings in the corner.
+        // The torch on the left of the shutter, auto capture on the right, settings in the corner, all
+        // standing on the same line as the shutter.
         Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 28.dp)) {
             Row(
                 Modifier.align(Alignment.Center),
                 horizontalArrangement = Arrangement.spacedBy(28.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Bottom,
             ) {
                 if (hasFlash) {
                     CameraToggle(
@@ -545,7 +547,8 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             }
             IconButton(
                 onClick = onOpenSettings,
-                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp),
+                // Down by the margin around its 40 dp circle, so the circle sits on the line too.
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp).offset(y = 4.dp),
                 colors = IconButtonDefaults.iconButtonColors(containerColor = Color.Black.copy(alpha = 0.45f), contentColor = Color.White),
             ) { Icon(Icons.Filled.Settings, "Settings", Modifier.rotate(iconAngle)) }
         }
