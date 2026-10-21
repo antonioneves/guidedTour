@@ -98,12 +98,30 @@ object Recognizer {
     }
 
     /**
-     * Reads [photo], which isn't changed. The text is first looked for on a smaller copy; with
+     * Reads [photo], which isn't changed, or only its [region] (the text block aimed at in the
+     * preview) if given. The text is first looked for on a smaller copy; with
      * [enhance], only the area it's in is then read again from the full-resolution photo (sharper, and
      * no time spent on the rest), and a second pass straightens it, enlarges small letters and boosts
      * contrast. Whichever reading looks more reliable wins.
      */
-    suspend fun read(photo: Bitmap, script: OcrScript, enhance: Boolean = true): Reading {
+    suspend fun read(photo: Bitmap, script: OcrScript, enhance: Boolean = true, region: PhotoRegion? = null): Reading {
+        if (region == null) return readAll(photo, script, enhance)
+        // Only the text block that was aimed at: text around it is left out from the start.
+        val aimed = withContext(Dispatchers.Default) {
+            val left = (region.left * photo.width).toInt().coerceIn(0, photo.width - 1)
+            val top = (region.top * photo.height).toInt().coerceIn(0, photo.height - 1)
+            val right = (region.right * photo.width).toInt().coerceIn(left + 1, photo.width)
+            val bottom = (region.bottom * photo.height).toInt().coerceIn(top + 1, photo.height)
+            Bitmap.createBitmap(photo, left, top, right - left, bottom - top)
+        }
+        return try {
+            readAll(aimed, script, enhance)
+        } finally {
+            if (aimed !== photo) aimed.recycle()
+        }
+    }
+
+    private suspend fun readAll(photo: Bitmap, script: OcrScript, enhance: Boolean): Reading {
         val overview = withContext(Dispatchers.Default) { shrunk(photo, OVERVIEW_SIDE) }
         var source = overview
         var turn = 0

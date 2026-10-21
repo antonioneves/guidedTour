@@ -205,3 +205,30 @@ fun meanConfidence(blocks: List<OcrBlock>): Float {
 
 /** Splits saved text into its paragraphs. */
 fun paragraphsOf(text: String): List<String> = text.split(Regex("\n\\s*\n")).map { it.trim() }.filter { it.isNotEmpty() }
+
+/** A text block in the camera preview, in the preview's pixels, with the preview's size. */
+data class ViewArea(val left: Float, val top: Float, val right: Float, val bottom: Float, val viewWidth: Int, val viewHeight: Int)
+
+/** Part of a photo, as fractions of its width and height. */
+data class PhotoRegion(val left: Float, val top: Float, val right: Float, val bottom: Float)
+
+/**
+ * Where [area] falls in a photo [width] × [height] that the preview showed filling and centred, its
+ * overflow cropped (how the camera preview shows it), with [margin] of the area's size added on each
+ * side for the phone moving between the preview frame and the photo. Null if the photo isn't the
+ * preview's way round (the phone turned while the screen stayed upright), or the area is empty.
+ */
+fun photoRegion(area: ViewArea, width: Int, height: Int, margin: Float = 0.15f): PhotoRegion? {
+    if (width <= 0 || height <= 0 || area.viewWidth <= 0 || area.viewHeight <= 0) return null
+    if ((width > height) != (area.viewWidth > area.viewHeight)) return null
+    if (area.right <= area.left || area.bottom <= area.top) return null
+    val scale = max(area.viewWidth.toFloat() / width, area.viewHeight.toFloat() / height)
+    fun x(v: Float) = ((v - area.viewWidth / 2f) / scale + width / 2f) / width
+    fun y(v: Float) = ((v - area.viewHeight / 2f) / scale + height / 2f) / height
+    val padX = (x(area.right) - x(area.left)) * margin
+    val padY = (y(area.bottom) - y(area.top)) * margin
+    return PhotoRegion(
+        (x(area.left) - padX).coerceIn(0f, 1f), (y(area.top) - padY).coerceIn(0f, 1f),
+        (x(area.right) + padX).coerceIn(0f, 1f), (y(area.bottom) + padY).coerceIn(0f, 1f),
+    ).takeIf { it.right > it.left && it.bottom > it.top }
+}

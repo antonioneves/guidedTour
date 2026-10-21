@@ -11,6 +11,8 @@ import com.guidedtour.app.data.AppDatabase
 import com.guidedtour.app.data.Accuracy
 import com.guidedtour.app.data.CloudOcr
 import com.guidedtour.app.data.WordLists
+import com.guidedtour.app.data.ViewArea
+import com.guidedtour.app.data.photoRegion
 import com.guidedtour.app.data.readPickedPhoto
 import com.guidedtour.app.data.Locator
 import com.guidedtour.app.data.PhotoSpot
@@ -130,8 +132,11 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Reads the sharpest photo; if that finds nothing, falls back to [liveText] seen in the preview. */
-    fun finishCapture(liveText: String) {
+    /**
+     * Reads the sharpest photo, only inside [aimed] (the text block outlined in the preview) if given;
+     * if that finds nothing, falls back to [liveText] seen in the preview.
+     */
+    fun finishCapture(liveText: String, aimed: ViewArea? = null) {
         val frame = bestFrame
         bestFrame = null
         bestSharpness = -1.0
@@ -139,7 +144,9 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
             if (frame == null) {
                 persist(liveText, null, emptySet())
             } else {
-                val reading = Recognizer.read(frame, settings.script.value)
+                // Only the text block that was outlined in the preview, when it maps onto the photo.
+                val region = aimed?.let { photoRegion(it, frame.width, frame.height) }
+                val reading = Recognizer.read(frame, settings.script.value, region = region)
                 // Save the photo the way the text reads, if it had to be turned.
                 val photo = if (reading.turn == 0) frame else withContext(Dispatchers.Default) {
                     Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, android.graphics.Matrix().apply { postRotate(reading.turn.toFloat()) }, true)
