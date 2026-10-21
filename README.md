@@ -7,7 +7,8 @@ scanned, and reads it aloud, also with the screen off.
 ## Features
 
 - **Scan**: live text recognition with tips for a better photo (too dark, too small, cut off,
-  shaky, glare). Capture with the shutter button or the volume key, or let it capture
+  shaky, glare). Text photographed at an angle, from the side or below, is stretched back square,
+  and sideways or tilted text is turned upright. Capture with the shutter button or the volume key, or let it capture
   automatically once the text looks readable. Optionally takes three photos and keeps the sharpest.
 - **Correct misread words**: words the camera wasn't sure of, and that aren't real words in their
   paragraph's language, are replaced by the likeliest common word one OCR slip away ("tcmple" →
@@ -101,7 +102,7 @@ The result is written to `app/src/release/generated/baselineProfiles/`; commit i
 ./gradlew :app:testDebugUnitTest
 ```
 
-Unit tests cover text layout and clean-up, misread-word correction, sentence splitting, photo tips, analysis throttling
+Unit tests cover text layout and clean-up, misread-word correction, perspective, sentence splitting, photo tips, analysis throttling
 and visit grouping.
 
 **OCR accuracy**: `tools/make_ocr_testset.py` generates synthetic plaque photos with their true

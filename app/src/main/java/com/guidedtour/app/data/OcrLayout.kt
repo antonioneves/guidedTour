@@ -1,17 +1,32 @@
 package com.guidedtour.app.data
 
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
-/** One recognised line with its pixel box, ML Kit's confidence, its tilt in degrees and its words with their confidence. */
+/**
+ * One recognised line with its upright pixel box, ML Kit's confidence, its tilt in degrees, its words
+ * with their confidence, and its [corners] as the text reads (x, y of the top-left, top-right,
+ * bottom-right and bottom-left), which follow the line when it slants.
+ */
 data class OcrLine(
     val text: String,
     val left: Int, val top: Int, val right: Int, val bottom: Int,
     val confidence: Float = 1f,
     val angle: Float = 0f,
     val words: List<Pair<String, Float>> = emptyList(),
+    val corners: List<Float> = emptyList(),
 ) {
+    /** The upright box's height: for a slanted line, more than its letters. */
     val height: Int get() = bottom - top
+
+    /** How tall the letters are, measured across the line even when it slants. */
+    val size: Int get() = if (corners.size == 8) ((side(0, 3) + side(1, 2)) / 2).toInt() else height
+
+    /** How long the line is, along its slant. */
+    val length: Float get() = if (corners.size == 8) (side(0, 1) + side(3, 2)) / 2 else (right - left).toFloat()
+
+    private fun side(a: Int, b: Int) = hypot(corners[2 * b] - corners[2 * a], corners[2 * b + 1] - corners[2 * a + 1])
 }
 
 /** A block of lines, roughly a paragraph. */
@@ -21,7 +36,7 @@ data class OcrBlock(val lines: List<OcrLine>) {
     val right: Int get() = lines.maxOf { it.right }
     val bottom: Int get() = lines.maxOf { it.bottom }
     val width: Int get() = right - left
-    val medianLineHeight: Int get() = lines.map { it.height }.sorted()[lines.size / 2]
+    val medianLineHeight: Int get() = lines.map { it.size }.sorted()[lines.size / 2]
     val text: String get() = joinLines(lines.map { it.text })
 }
 

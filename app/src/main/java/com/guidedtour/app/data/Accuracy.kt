@@ -42,6 +42,8 @@ object Accuracy {
             correctedTotal += corrected
             report.appendLine("%-24s basic %5.1f%%   improved %5.1f%%   corrected %5.1f%%".format(Locale.US, file.name.take(24), basic * 100, improved * 100, corrected * 100))
             changedWords(reading.text, fixed).forEach { report.appendLine("    $it") }
+            // What was read, when it went wrong, to see how.
+            if (corrected > 0.02) report.appendLine("    read: " + fixed.replace(Regex("\\s+"), " ").take(400))
             File(dir, file.nameWithoutExtension + ".lang").takeIf { it.exists() }?.let { expectedFile ->
                 val expected = expectedFile.readText().trim().split(',').map { it.trim() }
                 val found = spans.map { it.tag }

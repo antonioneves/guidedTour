@@ -9,6 +9,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
 import androidx.camera.core.ImageProxy
+import androidx.core.graphics.createBitmap
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -148,7 +149,11 @@ object Recognizer {
                 .addOnSuccessListener { text ->
                     cont.resume(text.textBlocks.mapNotNull { block ->
                         val lines = block.lines.mapNotNull { line ->
-                            line.boundingBox?.let { OcrLine(line.text, it.left, it.top, it.right, it.bottom, line.confidence, line.angle, line.elements.map { e -> e.text to e.confidence }) }
+                            line.boundingBox?.let { OcrLine(
+                                line.text, it.left, it.top, it.right, it.bottom, line.confidence, line.angle,
+                                line.elements.map { e -> e.text to e.confidence },
+                                line.cornerPoints?.takeIf { c -> c.size == 4 }?.flatMap { c -> listOf(c.x.toFloat(), c.y.toFloat()) }.orEmpty(),
+                            ) }
                         }
                         if (lines.isEmpty()) null else OcrBlock(lines)
                     })
@@ -156,12 +161,18 @@ object Recognizer {
                 .addOnFailureListener { cont.resume(emptyList()) }
         }
 
-    /** A copy of [bitmap] with tilted text straightened (or cropped to the text) and contrast raised. */
+    /**
+     * A copy of [bitmap] with text seen at an angle stretched back square, tilted text straightened
+     * (or else cropped to the text), and contrast raised.
+     */
     private fun enhanced(bitmap: Bitmap, blocks: List<OcrBlock>): Bitmap {
         val lines = blocks.flatMap { it.lines }
         val tilt = lines.map { it.angle }.sorted()[lines.size / 2]
         var source = bitmap
-        if (abs(tilt) in 2f..30f) {
+        val squared = textQuad(lines)?.let { squared(bitmap, it) }
+        if (squared != null) {
+            source = squared
+        } else if (abs(tilt) in 2f..30f) {
             source = rotated(bitmap, -tilt)
         } else {
             val left = lines.minOf { it.left }
@@ -177,6 +188,29 @@ object Recognizer {
             }
         }
         return contrast(source).also { if (source !== bitmap) source.recycle() }
+    }
+
+    /**
+     * The text area [quad] (see [textQuad]) of [bitmap] stretched to a rectangle with a margin around
+     * it, or null if it can't be. The text's true proportions are unknown, so each side gets the
+     * longer of its two edges, keeping the most detail.
+     */
+    private fun squared(bitmap: Bitmap, quad: FloatArray): Bitmap? {
+        fun edge(a: Int, b: Int) = kotlin.math.hypot(quad[2 * b] - quad[2 * a], quad[2 * b + 1] - quad[2 * a + 1])
+        var width = max(edge(0, 1), edge(3, 2))
+        var height = max(edge(0, 3), edge(1, 2))
+        if (width < 32f || height < 16f) return null
+        var margin = 0.08f * max(width, height)
+        val scale = min(1f, MAX_SIDE / (max(width, height) + 2 * margin))
+        width *= scale; height *= scale; margin *= scale
+        val target = floatArrayOf(margin, margin, margin + width, margin, margin + width, margin + height, margin, margin + height)
+        val matrix = Matrix()
+        if (!matrix.setPolyToPoly(quad, 0, target, 0, 4)) return null
+        val out = createBitmap((width + 2 * margin).toInt(), (height + 2 * margin).toInt())
+        val canvas = Canvas(out)
+        canvas.drawColor(Color.WHITE)
+        canvas.drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
+        return out
     }
 
     private fun rotated(bitmap: Bitmap, degrees: Float): Bitmap {
