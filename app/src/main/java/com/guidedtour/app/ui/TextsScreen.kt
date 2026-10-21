@@ -26,6 +26,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.outlined.Notes
+import androidx.compose.ui.res.painterResource
+import com.guidedtour.app.R
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
@@ -400,7 +402,7 @@ private fun EmptyState(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(Icons.AutoMirrored.Outlined.Notes, null, Modifier.size(72.dp), tint = MaterialTheme.colorScheme.outline)
+        Icon(painterResource(R.drawable.ic_tab_guides), null, Modifier.size(72.dp), tint = MaterialTheme.colorScheme.outline)
         Spacer(Modifier.size(16.dp))
         Text("Nothing scanned yet", style = MaterialTheme.typography.titleLarge)
         Text(
