@@ -6,8 +6,14 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.view.Gravity
 import androidx.compose.foundation.background
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.ListItem
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -119,6 +125,7 @@ fun MapScreen(viewModel: TourViewModel) {
     var style by remember { mutableStateOf<Style?>(null) }
     // The place whose pin was tapped (by its first scan's id): its row is scrolled to and highlighted.
     var selected by remember { mutableStateOf<Long?>(null) }
+    var showCredits by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val dark = isSystemInDarkTheme()
     val routeColor = MaterialTheme.colorScheme.primary.toArgb()
@@ -250,7 +257,6 @@ fun MapScreen(viewModel: TourViewModel) {
     ) {
         Box(Modifier.fillMaxSize()) {
             MapLibreView(
-                bottomPadding = bottomPadding.toInt(),
                 onMapReady = { m ->
                     m.uiSettings.isCompassEnabled = true
                     m.addOnMapClickListener { point ->
@@ -266,17 +272,21 @@ fun MapScreen(viewModel: TourViewModel) {
                     map = m
                 },
             )
-            // OpenStreetMap's licence asks for visible credit; the (i) button lists the full sources.
-            Text(
-                "© OpenStreetMap",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 8.dp, bottom = PeekHeight + 20.dp)
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f), MaterialTheme.shapes.small)
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
+            // OpenStreetMap's licence asks for visible credit; tapping it lists every source.
+            Surface(
+                onClick = { showCredits = true },
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = PeekHeight + 20.dp),
+            ) {
+                Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Info, null, Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("© OpenStreetMap", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            if (showCredits) MapCredits(onDismiss = { showCredits = false })
             Column(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(16.dp)) {
                 if (!online) {
                     Surface(
@@ -351,7 +361,7 @@ private fun PlaceRow(place: Place, player: PlayerState, highlighted: Boolean, on
 
 /** MapLibre's MapView, following the screen's lifecycle. */
 @Composable
-private fun MapLibreView(bottomPadding: Int, onMapReady: (MapLibreMap) -> Unit) {
+private fun MapLibreView(onMapReady: (MapLibreMap) -> Unit) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val mapView = remember {
@@ -359,10 +369,9 @@ private fun MapLibreView(bottomPadding: Int, onMapReady: (MapLibreMap) -> Unit) 
         MapView(context).apply {
             onCreate(null)
             getMapAsync { m ->
-                // Keep the logo and the OpenStreetMap credit above the bottom sheet.
+                // The credits are shown by MapCredits instead of MapLibre's own (i) dialog.
                 m.uiSettings.isLogoEnabled = false
-                m.uiSettings.attributionGravity = Gravity.BOTTOM or Gravity.START
-                m.uiSettings.setAttributionMargins(24, 0, 0, bottomPadding + 16)
+                m.uiSettings.isAttributionEnabled = false
                 onMapReady(m)
             }
         }
@@ -426,3 +435,32 @@ private fun isOnline(context: Context): Boolean {
     val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return false
     return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }
+
+/** Who made the map, each linking to its site: the credit OpenStreetMap and OpenMapTiles ask for. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MapCredits(onDismiss: () -> Unit) {
+    val uri = LocalUriHandler.current
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(bottom = 16.dp)) {
+            Text("Map data", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+            CREDITS.forEach { (title, detail, link) ->
+                ListItem(
+                    headlineContent = { Text(title) },
+                    supportingContent = { Text(detail) },
+                    trailingContent = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, "Open website") },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.clickable { uri.openUri(link) }.padding(horizontal = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+private val CREDITS = listOf(
+    Triple("© OpenStreetMap contributors", "Map data, under the Open Database License", "https://www.openstreetmap.org/copyright"),
+    Triple("© OpenMapTiles", "Map design", "https://openmaptiles.org/"),
+    Triple("OpenFreeMap", "Free map tiles", "https://openfreemap.org/"),
+    Triple("MapLibre", "Map engine", "https://maplibre.org/"),
+    Triple("Improve this map", "Report a mistake to OpenStreetMap", "https://www.openstreetmap.org/fix-the-map"),
+)
