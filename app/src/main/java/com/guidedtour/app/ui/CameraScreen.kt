@@ -1,6 +1,13 @@
 package com.guidedtour.app.ui
 
 import android.Manifest
+import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraCharacteristics
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.FilledIconToggleButton
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.FlashOff
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Matrix
@@ -53,8 +60,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -96,7 +101,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -284,6 +288,8 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
     val steady by rememberSteady(active = visible)
     val tip = evaluate(frame, viewSize.width, viewSize.height, steady)
     var autoCapture by remember { mutableStateOf(true) }
+    var torch by remember { mutableStateOf(false) }
+    val hasFlash = remember { hasFlashUnit(context) }
     var armed by remember { mutableStateOf(true) }
     val countdown = remember { Animatable(0f) }
     val flash = remember { Animatable(0f) }
@@ -351,6 +357,29 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             delay(IDLE_RELEASE_MS)
             controller.unbind()
         }
+    }
+
+    // The flash is a steady light, so it lights every photo of the burst and the live text outline.
+    LaunchedEffect(torch, visible) { controller.enableTorch(torch && visible) }
+    LaunchedEffect(visible) { if (!visible) torch = false }
+
+    fun toggleTorch() {
+        torch = !torch
+        snackbar.currentSnackbarData?.dismiss()
+        if (torch) scope.launch {
+            val result = snackbar.showSnackbar(
+                "Flash on. Many museums don't allow it, as it can harm artworks. Check before using it.",
+                actionLabel = "Turn off",
+                duration = SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed) torch = false
+        }
+    }
+
+    fun toggleAutoCapture() {
+        autoCapture = !autoCapture
+        snackbar.currentSnackbarData?.dismiss()
+        scope.launch { snackbar.showSnackbar(if (autoCapture) "Auto capture on" else "Auto capture off") }
     }
 
     fun capture() {
@@ -474,22 +503,6 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                 processing -> StatusPill(Icons.Outlined.DocumentScanner, "Reading the text…")
                 else -> TipPill(tip = tip, message = if (autoActive) "Hold steady – capturing…" else tip.message)
             }
-            FilterChip(
-                selected = autoCapture,
-                onClick = { autoCapture = !autoCapture },
-                label = { Text("Auto capture") },
-                modifier = Modifier.semantics { stateDescription = if (autoCapture) "On" else "Off" },
-                leadingIcon = { Icon(Icons.Filled.AutoMode, null, Modifier.size(FilterChipDefaults.IconSize)) },
-                colors = FilterChipDefaults.filterChipColors(
-                    containerColor = Color.Black.copy(alpha = 0.45f),
-                    labelColor = Color.White,
-                    iconColor = Color.White,
-                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                ),
-                border = null,
-            )
         }
 
         IconButton(
@@ -501,13 +514,37 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp))
         if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
 
-        Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp)) {
+        // Auto capture on the left of the shutter, the flash on the right.
+        Row(
+            Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp),
+            horizontalArrangement = Arrangement.spacedBy(28.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CameraToggle(
+                checked = autoCapture,
+                onToggle = ::toggleAutoCapture,
+                icon = Icons.Filled.AutoMode,
+                label = "Auto capture",
+                iconAngle = iconAngle,
+            )
             if (state == ScanState.Processing) {
                 Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.size(92.dp)) {
                     Box(contentAlignment = Alignment.Center) { LoadingIndicator() }
                 }
             } else {
                 Shutter(progress = countdown.value, iconAngle = iconAngle, onClick = ::capture)
+            }
+            if (hasFlash) {
+                CameraToggle(
+                    checked = torch,
+                    onToggle = ::toggleTorch,
+                    icon = if (torch) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
+                    label = "Flash",
+                    iconAngle = iconAngle,
+                )
+            } else {
+                // Keeps the shutter centred.
+                Spacer(Modifier.size(CAMERA_TOGGLE_SIZE))
             }
         }
     }
@@ -565,6 +602,34 @@ private fun StatusPill(icon: ImageVector, message: String, highlight: Boolean = 
         }
     }
 }
+
+private val CAMERA_TOGGLE_SIZE = 52.dp
+
+/** A round on/off button beside the shutter: filled when on, see-through when off. */
+@Composable
+private fun CameraToggle(checked: Boolean, onToggle: () -> Unit, icon: ImageVector, label: String, iconAngle: Float) {
+    FilledIconToggleButton(
+        checked = checked,
+        onCheckedChange = { onToggle() },
+        modifier = Modifier.size(CAMERA_TOGGLE_SIZE),
+        colors = IconButtonDefaults.filledIconToggleButtonColors(
+            containerColor = Color.Black.copy(alpha = 0.45f),
+            contentColor = Color.White,
+            checkedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+            checkedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+    ) { Icon(icon, label, Modifier.rotate(iconAngle)) }
+}
+
+/** Whether the back camera has a flash that can stay on as a light. */
+private fun hasFlashUnit(context: android.content.Context): Boolean = runCatching {
+    val manager = context.getSystemService(CameraManager::class.java)
+    manager.cameraIdList.any { id ->
+        val info = manager.getCameraCharacteristics(id)
+        info.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK &&
+            info.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+    }
+}.getOrDefault(false)
 
 /** Shutter with a ring that fills while the automatic capture countdown runs. */
 @Composable
