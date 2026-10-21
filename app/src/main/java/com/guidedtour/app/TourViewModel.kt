@@ -9,6 +9,7 @@ import com.guidedtour.app.data.AppDatabase
 import com.guidedtour.app.data.Accuracy
 import com.guidedtour.app.data.CloudOcr
 import com.guidedtour.app.data.Locator
+import com.guidedtour.app.data.PlacePhotos
 import com.guidedtour.app.data.PlayerState
 import com.guidedtour.app.data.QueueItem
 import com.guidedtour.app.data.Recognizer
@@ -44,6 +45,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     private val locator = Locator(app)
     private val reader = TextReader.get(app)
     val settings = Settings.get(app)
+    val placePhotos = PlacePhotos.get(app)
 
     // Loaded from the start, so Guides rarely opens before the database has been read; null until then.
     private val loadedScans: StateFlow<List<Scan>?> = dao.observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, null)

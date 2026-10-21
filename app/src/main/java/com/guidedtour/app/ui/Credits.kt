@@ -47,6 +47,7 @@ private val CREDIT_SECTIONS = listOf(
         Credit("Android text-to-speech", "The voices that read aloud, from the phone's speech engine", "https://developer.android.com/reference/android/speech/tts/TextToSpeech"),
         Credit("Google Play services location", "Where each photo was taken", "https://developers.google.com/location-context/fused-location-provider"),
         Credit("Android Geocoder", "Place names for the places visited", "https://developer.android.com/reference/android/location/Geocoder"),
+        Credit("Wikipedia and Wikimedia Commons", "Photos of places, each credited to its author under its own free licence", "https://commons.wikimedia.org/wiki/Commons:Reusing_content_outside_Wikimedia"),
     ),
     "Built with" to listOf(
         Credit("CameraX", "The camera, under the Apache 2.0 licence", "https://developer.android.com/media/camera/camerax"),

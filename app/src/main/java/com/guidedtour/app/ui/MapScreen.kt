@@ -65,6 +65,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.animation.animateContentSize
 import com.guidedtour.app.TourViewModel
 import com.guidedtour.app.data.Place
 import com.guidedtour.app.data.PlayerState
@@ -228,6 +229,7 @@ fun MapScreen(viewModel: TourViewModel) {
                         PlaceRow(
                             place,
                             player,
+                            viewModel,
                             highlighted = place.scans.first().id == selected,
                             onClick = {
                                 scope.launch {
@@ -300,7 +302,7 @@ fun MapScreen(viewModel: TourViewModel) {
 }
 
 @Composable
-private fun PlaceRow(place: Place, player: PlayerState, highlighted: Boolean, onClick: () -> Unit, onPlay: () -> Unit) {
+private fun PlaceRow(place: Place, player: PlayerState, viewModel: TourViewModel, highlighted: Boolean, onClick: () -> Unit, onPlay: () -> Unit) {
     val first = place.scans.first()
     val active = player.current?.id in place.scans.map { it.id }
     val playing = active && player.playing
@@ -309,9 +311,19 @@ private fun PlaceRow(place: Place, player: PlayerState, highlighted: Boolean, on
         highlighted -> MaterialTheme.colorScheme.secondaryContainer
         else -> Color.Transparent
     }
+    // A tapped pin's row opens with a photo of the place above it.
+    val photo = if (highlighted) rememberPlacePhoto(viewModel, place) else null
+    Column(Modifier.fillMaxWidth().background(background).animateContentSize()) {
+        if (photo != null) PlacePhotoBanner(photo, Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), height = 140.dp)
+        PlaceRowContent(place, first, playing, active, onClick, onPlay)
+    }
+}
+
+@Composable
+private fun PlaceRowContent(place: Place, first: Scan, playing: Boolean, active: Boolean, onClick: () -> Unit, onPlay: () -> Unit) {
     // Pin (or count) with the time below it, then the place and its text, then play centred.
     Row(
-        Modifier.fillMaxWidth().background(background).clickable(onClickLabel = "Show on the map", onClick = onClick)
+        Modifier.fillMaxWidth().clickable(onClickLabel = "Show on the map", onClick = onClick)
             .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

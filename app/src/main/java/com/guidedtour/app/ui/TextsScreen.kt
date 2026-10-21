@@ -81,6 +81,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -97,7 +98,9 @@ import com.guidedtour.app.TourViewModel
 import com.guidedtour.app.data.PlayerState
 import com.guidedtour.app.data.Scan
 import com.guidedtour.app.data.Translator
+import com.guidedtour.app.data.Place
 import com.guidedtour.app.data.Visit
+import com.guidedtour.app.data.groupPlaces
 import com.guidedtour.app.data.groupVisits
 import com.guidedtour.app.data.paragraphsOf
 import java.time.format.DateTimeFormatter
@@ -130,6 +133,8 @@ fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings
         }
     }
     val visits = remember(visible) { groupVisits(visible) }
+    // Each scan's place, as on the map, so a visit shows the same photo as its pin.
+    val placeOf = remember(scans) { groupPlaces(scans).flatMap { place -> place.scans.map { it.id to place } }.toMap() }
     val processing = scanState is ScanState.Processing
 
     fun delete(scan: Scan) {
@@ -218,7 +223,7 @@ fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings
                     }
                 }
                 visits.forEach { visit ->
-                    item(key = "visit-${visit.id}") { VisitHeader(visit, onPlay = { viewModel.playAll(visit.chronological) }) }
+                    item(key = "visit-${visit.id}") { VisitHeader(visit, visit.scans.firstNotNullOfOrNull { placeOf[it.id] }, viewModel, onPlay = { viewModel.playAll(visit.chronological) }) }
                     items(visit.scans, key = { it.id }) { scan ->
                         ScanCard(
                             scan, player, scan.id in translating, target, viewModel,
@@ -234,17 +239,37 @@ fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings
 }
 
 @Composable
-private fun VisitHeader(visit: Visit, onPlay: () -> Unit) {
+private fun VisitHeader(visit: Visit, place: Place?, viewModel: TourViewModel, onPlay: () -> Unit) {
     val day = visit.day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
     val title = visit.place?.let { "$it · $day" } ?: day
+    val count = if (visit.scans.size == 1) "1 text" else "${visit.scans.size} texts"
+    val photo = rememberPlacePhoto(viewModel, place)
+    if (photo != null) {
+        // The place's photo behind its name, white on the photo's darkened bottom.
+        PlacePhotoBanner(photo, Modifier.padding(top = 8.dp)) {
+            Row(
+                Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, color = Color.White, modifier = Modifier.semantics { heading() })
+                    Text(count, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.85f))
+                }
+                if (visit.scans.size > 1) {
+                    FilledTonalButton(onClick = onPlay) {
+                        Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text("Play visit")
+                    }
+                }
+            }
+        }
+        return
+    }
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-            Text(
-                if (visit.scans.size == 1) "1 text" else "${visit.scans.size} texts",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text(count, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (visit.scans.size > 1) {
             TextButton(onClick = onPlay) {

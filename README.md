@@ -18,6 +18,9 @@ scanned, and reads it aloud, also with the screen off.
   search, favourites, "Play visit", text editing and swipe to delete.
 - **Places**: an OpenStreetMap map of where each text was scanned, with the walking route of
   each day. No map key or account needed.
+- **Photos of places**: each visit, and a tapped pin, shows a photo of the place: the lead image
+  of the most notable Wikipedia article nearby, from Wikimedia Commons, credited to its author.
+  Can be turned off in Settings.
 - **Bilingual plaques**: the language is detected paragraph by paragraph, so a plaque in, say,
   Portuguese and English reads each part with its own voice and translates each from its own
   language. A guide's language can also be set by hand.
@@ -26,7 +29,7 @@ scanned, and reads it aloud, also with the screen off.
 - **Scripts**: Latin, Chinese, Japanese, Korean and Devanagari, detected automatically.
 - **Improve with cloud** (optional): sends one photo to Google Cloud Vision for a second reading.
 
-Everything except new map areas, translation model downloads and the optional cloud reading works
+Everything except new map areas, new place photos, translation model downloads and the optional cloud reading works
 offline. See [PRIVACY.md](PRIVACY.md) for what leaves the device.
 
 ## Requirements

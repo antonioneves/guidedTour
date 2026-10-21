@@ -34,6 +34,9 @@ class Settings private constructor(context: Context) {
     val carefulCapture: StateFlow<Boolean> = _carefulCapture
     private val _volumeShutter = MutableStateFlow(prefs.getBoolean("volumeShutter", false))
     val volumeShutter: StateFlow<Boolean> = _volumeShutter
+    private val _placePhotos = MutableStateFlow(prefs.getBoolean("placePhotos", true))
+    /** Show Wikipedia photos of the places guides were scanned at (asks Wikipedia about each place). */
+    val placePhotos: StateFlow<Boolean> = _placePhotos
     private val _script = MutableStateFlow(
         OcrScript.entries.firstOrNull { it.name == prefs.getString("script", null) } ?: OcrScript.Auto
     )
@@ -61,6 +64,7 @@ class Settings private constructor(context: Context) {
     fun setDuckMusic(value: Boolean) { _duckMusic.value = value; prefs.edit().putBoolean("duckMusic", value).apply() }
     fun setCarefulCapture(value: Boolean) { _carefulCapture.value = value; prefs.edit().putBoolean("carefulCapture", value).apply() }
     fun setVolumeShutter(value: Boolean) { _volumeShutter.value = value; prefs.edit().putBoolean("volumeShutter", value).apply() }
+    fun setPlacePhotos(value: Boolean) { _placePhotos.value = value; prefs.edit().putBoolean("placePhotos", value).apply() }
     fun setTranslateTo(code: String) { _translateTo.value = code; prefs.edit().putString("translateTo", code).apply() }
     fun setScript(value: OcrScript) { _script.value = value; prefs.edit().putString("script", value.name).apply() }
 }

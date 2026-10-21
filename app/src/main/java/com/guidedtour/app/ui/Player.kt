@@ -347,6 +347,7 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
     val volumeShutter by settings.volumeShutter.collectAsStateWithLifecycle()
     val duckMusic by settings.duckMusic.collectAsStateWithLifecycle()
     val careful by settings.carefulCapture.collectAsStateWithLifecycle()
+    val placePhotos by settings.placePhotos.collectAsStateWithLifecycle()
     val report by viewModel.accuracyReport.collectAsStateWithLifecycle()
     val script by settings.script.collectAsStateWithLifecycle()
     var showCredits by remember { mutableStateOf(false) }
@@ -383,6 +384,12 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
                 "Volume buttons take the photo",
                 "On the Scan tab, press a volume button to capture one-handed.",
                 volumeShutter, settings::setVolumeShutter,
+            )
+
+            SwitchRow(
+                "Photos of places",
+                "Shows a Wikipedia photo of each place in Guides and on the map. Asks Wikipedia about each place by its name and area, never your exact position.",
+                placePhotos, settings::setPlacePhotos,
             )
 
             Text("Text language to look for", style = MaterialTheme.typography.titleSmall)
