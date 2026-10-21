@@ -49,7 +49,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoMode
-import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.BlurOn
@@ -102,6 +101,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
@@ -534,7 +534,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                         Box(contentAlignment = Alignment.Center) { LoadingIndicator() }
                     }
                 } else {
-                    Shutter(progress = countdown.value, showRing = autoCapture, iconAngle = iconAngle, onClick = ::capture)
+                    Shutter(progress = countdown.value, showRing = autoCapture, onClick = ::capture)
                 }
                 CameraToggle(
                     checked = autoCapture,
@@ -639,7 +639,7 @@ private fun hasFlashUnit(context: android.content.Context): Boolean = runCatchin
  * there's no countdown, so the ring fades away; the shutter keeps its size so nothing around it moves.
  */
 @Composable
-private fun Shutter(progress: Float, showRing: Boolean, iconAngle: Float, onClick: () -> Unit) {
+private fun Shutter(progress: Float, showRing: Boolean, onClick: () -> Unit) {
     val ringAlpha by animateFloatAsState(if (showRing) 1f else 0f, label = "ring")
     Box(Modifier.size(92.dp), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(
@@ -651,10 +651,12 @@ private fun Shutter(progress: Float, showRing: Boolean, iconAngle: Float, onClic
             strokeCap = StrokeCap.Round,
             gapSize = 0.dp,
         )
-        Surface(onClick = onClick, shape = CircleShape, color = Color.White, modifier = Modifier.size(70.dp)) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.CameraAlt, "Take photo and read text", tint = Color(0xFF202020), modifier = Modifier.size(30.dp).rotate(iconAngle))
-            }
-        }
+        // A plain white button, like a camera app's shutter.
+        Surface(
+            onClick = onClick,
+            shape = CircleShape,
+            color = Color.White,
+            modifier = Modifier.size(70.dp).semantics { contentDescription = "Take photo and read text" },
+        ) {}
     }
 }
