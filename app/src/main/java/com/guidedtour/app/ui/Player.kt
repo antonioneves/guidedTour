@@ -214,58 +214,67 @@ private val thumbnailCache = object : LruCache<String, ImageBitmap>(24 * 1024 * 
 @Composable
 fun NowPlayingBar(player: PlayerState, viewModel: TourViewModel, onOpenQueue: () -> Unit, modifier: Modifier = Modifier) {
     val item = player.current ?: return
-    // A floating, rounded player in the inverse colours, so it stands apart from the cards.
+    // A floating, rounded player in the inverse colours, so it stands apart from the cards; with the
+    // place's photo behind it, darkened so the text and buttons stay readable.
     val colors = MaterialTheme.colorScheme
+    val photo = rememberPlacePhoto(viewModel, item.spot)
+    val content = if (photo != null) Color.White else colors.inverseOnSurface
     Surface(
         modifier = modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
         shape = RoundedCornerShape(24.dp),
         color = colors.inverseSurface,
-        contentColor = colors.inverseOnSurface,
+        contentColor = content,
         shadowElevation = 6.dp,
     ) {
-        Column(Modifier.clickable(onClickLabel = "Open reading queue", onClick = onOpenQueue)) {
-            // How far through the text the reading is (from the word being spoken).
-            val progress = player.highlight?.let { (it.last + 1).toFloat() / item.text.length.coerceAtLeast(1) } ?: 0f
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 6.dp).height(3.dp),
-                color = colors.inversePrimary,
-                trackColor = colors.inverseOnSurface.copy(alpha = 0.2f),
-                drawStopIndicator = {},
-            )
-            Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.Top) {
-                Column(Modifier.weight(1f).padding(top = 4.dp)) {
-                    Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    val position = if (player.queue.size > 1) "${player.index + 1} of ${player.queue.size} · " else ""
-                    Text(
-                        position + item.text,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                IconButton(onClick = viewModel::stopSpeaking) { Icon(Icons.Filled.Close, "Stop and clear queue") }
+        Box {
+            if (photo != null) {
+                Image(photo.image, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+                Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.55f)))
             }
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = viewModel::previous) { Icon(Icons.Filled.SkipPrevious, "Previous") }
-                IconButton(onClick = viewModel::seekBack) { Icon(Icons.Filled.Replay10, "Back $SEEK_SECONDS seconds") }
-                FilledIconButton(
-                    onClick = viewModel::togglePlayback,
-                    modifier = Modifier.size(56.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = colors.inversePrimary, contentColor = colors.inverseSurface),
-                ) {
-                    Icon(
-                        if (player.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        if (player.playing) "Pause" else "Play",
-                        Modifier.size(32.dp),
-                    )
+            Column(Modifier.clickable(onClickLabel = "Open reading queue", onClick = onOpenQueue)) {
+                // How far through the text the reading is (from the word being spoken).
+                val progress = player.highlight?.let { (it.last + 1).toFloat() / item.text.length.coerceAtLeast(1) } ?: 0f
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 6.dp).height(3.dp),
+                    color = colors.inversePrimary,
+                    trackColor = content.copy(alpha = 0.25f),
+                    drawStopIndicator = {},
+                )
+                Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.Top) {
+                    Column(Modifier.weight(1f).padding(top = 4.dp)) {
+                        Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val position = if (player.queue.size > 1) "${player.index + 1} of ${player.queue.size} · " else ""
+                        Text(
+                            position + item.text,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    IconButton(onClick = viewModel::stopSpeaking) { Icon(Icons.Filled.Close, "Stop and clear queue") }
                 }
-                IconButton(onClick = viewModel::seekForward) { Icon(Icons.Filled.Forward10, "Forward $SEEK_SECONDS seconds") }
-                IconButton(onClick = viewModel::next) { Icon(Icons.Filled.SkipNext, "Next") }
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = viewModel::previous) { Icon(Icons.Filled.SkipPrevious, "Previous") }
+                    IconButton(onClick = viewModel::seekBack) { Icon(Icons.Filled.Replay10, "Back $SEEK_SECONDS seconds") }
+                    FilledIconButton(
+                        onClick = viewModel::togglePlayback,
+                        modifier = Modifier.size(56.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = colors.inversePrimary, contentColor = colors.inverseSurface),
+                    ) {
+                        Icon(
+                            if (player.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            if (player.playing) "Pause" else "Play",
+                            Modifier.size(32.dp),
+                        )
+                    }
+                    IconButton(onClick = viewModel::seekForward) { Icon(Icons.Filled.Forward10, "Forward $SEEK_SECONDS seconds") }
+                    IconButton(onClick = viewModel::next) { Icon(Icons.Filled.SkipNext, "Next") }
+                }
             }
         }
     }

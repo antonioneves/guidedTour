@@ -72,6 +72,7 @@ import com.guidedtour.app.data.PlayerState
 import com.guidedtour.app.data.Scan
 import com.guidedtour.app.data.dailyRoutes
 import com.guidedtour.app.data.groupPlaces
+import com.guidedtour.app.data.photoSpot
 import kotlinx.coroutines.launch
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
@@ -312,7 +313,7 @@ private fun PlaceRow(place: Place, player: PlayerState, viewModel: TourViewModel
         else -> Color.Transparent
     }
     // A tapped pin's row opens with a photo of the place above it.
-    val photo = if (highlighted) rememberPlacePhoto(viewModel, place) else null
+    val photo = if (highlighted) rememberPlacePhoto(viewModel, place.photoSpot()) else null
     Column(Modifier.fillMaxWidth().background(background).animateContentSize()) {
         if (photo != null) PlacePhotoBanner(photo, Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), height = 140.dp)
         PlaceRowContent(place, first, playing, active, onClick, onPlay)

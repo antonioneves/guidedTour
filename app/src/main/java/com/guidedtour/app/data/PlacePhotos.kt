@@ -1,6 +1,7 @@
 package com.guidedtour.app.data
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.text.Html
 import android.util.LruCache
@@ -18,9 +19,19 @@ import java.net.URLEncoder
 import java.util.Locale
 
 /** A photo of a place, from Wikimedia Commons, with the credit its licence asks for. */
-data class PlacePhoto(val image: ImageBitmap, val author: String, val license: String, val page: String) {
+data class PlacePhoto(val bitmap: Bitmap, val author: String, val license: String, val page: String) {
+    val image: ImageBitmap = bitmap.asImageBitmap()
     val credit: String get() = listOf(author, license).filter { it.isNotBlank() }.joinToString(" · ")
 }
+
+/** What a place's photo is looked up by: where it is and what it's called. */
+data class PhotoSpot(val latitude: Double, val longitude: Double, val name: String?)
+
+/**
+ * A map place's spot: its centre, named after its first scan, so Guides, the map and the player
+ * all ask the same and share one photo.
+ */
+fun Place.photoSpot() = PhotoSpot(latitude, longitude, scans.firstNotNullOfOrNull { it.placeName })
 
 /** Wikipedia articles this close to a place can illustrate it. */
 const val PHOTO_RADIUS_M = 300
@@ -57,6 +68,9 @@ class PlacePhotos private constructor(context: Context) {
     private fun key(lat: Double, lng: Double, name: String?) =
         "%.3f_%.3f".format(Locale.US, lat, lng) + name?.let { "_" + Integer.toHexString(it.lowercase().hashCode()) }.orEmpty()
 
+    /** A photo of the place at [spot], or null if there's none (or it can't be fetched now). */
+    suspend fun photo(spot: PhotoSpot): PlacePhoto? = photo(spot.latitude, spot.longitude, spot.name)
+
     /** A photo of the place called [name] at [lat], [lng], or null if there's none (or it can't be fetched now). */
     suspend fun photo(lat: Double, lng: Double, name: String?): PlacePhoto? {
         val key = key(lat, lng, name)
@@ -74,7 +88,7 @@ class PlacePhotos private constructor(context: Context) {
         val info = File(dir, "$key.json").takeIf { it.exists() }?.let { runCatching { JSONObject(it.readText()) }.getOrNull() } ?: return null
         if (info.optBoolean("none")) return null
         val bitmap = BitmapFactory.decodeFile(File(dir, "$key.jpg").path) ?: return null
-        return PlacePhoto(bitmap.asImageBitmap(), info.optString("author"), info.optString("license"), info.optString("page"))
+        return PlacePhoto(bitmap, info.optString("author"), info.optString("license"), info.optString("page"))
     }
 
     /** True if a photo was saved; null if there's none (remembered) or the lookup failed (tried again later). */

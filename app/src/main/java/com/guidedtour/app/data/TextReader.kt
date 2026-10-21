@@ -25,6 +25,8 @@ data class QueueItem(
     val languageTag: String?,
     /** Where the text switches language, for bilingual plaques; empty when it's all [languageTag]. */
     val spans: List<LanguageSpan> = emptyList(),
+    /** Where the text was scanned, for the place's photo in the player and on the lock screen. */
+    val spot: PhotoSpot? = null,
 ) {
     val key: Long get() = id * 2 + if (translated) 1 else 0
 }

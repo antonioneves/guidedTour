@@ -101,6 +101,7 @@ import com.guidedtour.app.data.Translator
 import com.guidedtour.app.data.Place
 import com.guidedtour.app.data.Visit
 import com.guidedtour.app.data.groupPlaces
+import com.guidedtour.app.data.photoSpot
 import com.guidedtour.app.data.groupVisits
 import com.guidedtour.app.data.paragraphsOf
 import java.time.format.DateTimeFormatter
@@ -243,7 +244,7 @@ private fun VisitHeader(visit: Visit, place: Place?, viewModel: TourViewModel, o
     val day = visit.day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
     val title = visit.place?.let { "$it · $day" } ?: day
     val count = if (visit.scans.size == 1) "1 text" else "${visit.scans.size} texts"
-    val photo = rememberPlacePhoto(viewModel, place)
+    val photo = rememberPlacePhoto(viewModel, place?.photoSpot())
     if (photo != null) {
         // The place's photo behind its name, white on the photo's darkened bottom.
         PlacePhotoBanner(photo, Modifier.padding(top = 8.dp)) {

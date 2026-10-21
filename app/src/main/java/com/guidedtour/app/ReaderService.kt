@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
 import android.os.IBinder
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
@@ -15,8 +16,12 @@ import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.scale
 import androidx.media.app.NotificationCompat.MediaStyle
+import com.guidedtour.app.data.PhotoSpot
+import com.guidedtour.app.data.PlacePhotos
 import com.guidedtour.app.data.PlayerState
+import com.guidedtour.app.data.Settings
 import com.guidedtour.app.data.TextReader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +40,10 @@ class ReaderService : Service() {
     private lateinit var reader: TextReader
     private lateinit var session: MediaSessionCompat
     private var observing: Job? = null
+    /** The current place's photo, for the lock screen and the notification, and the spot it's of. */
+    private var art: Bitmap? = null
+    private var artSpot: PhotoSpot? = null
+    private var artJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -81,8 +90,8 @@ class ReaderService : Service() {
                     if (!state.active) {
                         stopSelf()
                     } else {
-                        updateSession(state)
-                        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(state))
+                        loadArt(state.current?.spot)
+                        show(state)
                     }
                 }
             }
@@ -96,12 +105,47 @@ class ReaderService : Service() {
         session.release()
     }
 
+    /** Loads the photo of [spot] (unless photos are off), then shows it with the current state. */
+    private fun loadArt(spot: PhotoSpot?) {
+        if (spot == artSpot) return
+        artSpot = spot
+        art = null
+        artJob?.cancel()
+        if (spot == null || !Settings.get(this).placePhotos.value) return
+        artJob = scope.launch {
+            val photo = PlacePhotos.get(this@ReaderService).photo(spot) ?: return@launch
+            if (artSpot != spot) return@launch
+            art = photo.bitmap.scaledTo(ART_SIZE)
+            reader.state.value.takeIf { it.active }?.let(::show)
+        }
+    }
+
+    /** What the session and notification show; the state also changes with every word spoken, which they don't. */
+    private var shown: List<Any?>? = null
+
+    /** Updates the session and notification, only when what they show has changed: the artwork is sent each time. */
+    private fun show(state: PlayerState) {
+        val key = listOf(state.current?.key, state.current?.title, state.index, state.queue.size, state.playing, art)
+        if (key == shown) return
+        shown = key
+        updateSession(state)
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(state))
+    }
+
+    /** Scaled down so its longest side is [size]: artwork goes to the system in one call, limited to 1 MB. */
+    private fun Bitmap.scaledTo(size: Int): Bitmap {
+        val scale = size.toFloat() / maxOf(width, height)
+        return if (scale >= 1f) this else scale((width * scale).toInt(), (height * scale).toInt())
+    }
+
     private fun updateSession(state: PlayerState) {
         val item = state.current ?: return
         session.setMetadata(
             MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, item.title)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "Guided Tour")
+                // The lock screen, the media controls and Bluetooth or car screens show it as the artwork.
+                .apply { art?.let { putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it) } }
                 .build()
         )
         val actions = PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or
@@ -137,6 +181,7 @@ class ReaderService : Service() {
             .setContentTitle(item?.title ?: "Reading scanned text")
             .setContentText(if (state.queue.size > 1) "${state.index + 1} of ${state.queue.size}" else "Reading aloud")
             .setContentIntent(open)
+            .setLargeIcon(art)
             .addAction(android.R.drawable.ic_media_previous, "Previous", action(ACTION_PREVIOUS, 1))
             .addAction(R.drawable.ic_replay_10, "Back $SEEK_SECONDS seconds", action(ACTION_BACK, 5))
             .addAction(
@@ -158,6 +203,8 @@ class ReaderService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "reading"
+        /** Longest side of the lock-screen artwork, in pixels (about 450 KB). */
+        private const val ART_SIZE = 400
         private const val NOTIFICATION_ID = 1
         private const val ACTION_TOGGLE = "com.guidedtour.app.TOGGLE"
         private const val ACTION_NEXT = "com.guidedtour.app.NEXT"

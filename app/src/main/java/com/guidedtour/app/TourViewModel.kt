@@ -9,7 +9,10 @@ import com.guidedtour.app.data.AppDatabase
 import com.guidedtour.app.data.Accuracy
 import com.guidedtour.app.data.CloudOcr
 import com.guidedtour.app.data.Locator
+import com.guidedtour.app.data.PhotoSpot
 import com.guidedtour.app.data.PlacePhotos
+import com.guidedtour.app.data.groupPlaces
+import com.guidedtour.app.data.photoSpot
 import com.guidedtour.app.data.PlayerState
 import com.guidedtour.app.data.QueueItem
 import com.guidedtour.app.data.Recognizer
@@ -162,7 +165,11 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
 
     // ---- Reading ----
 
-    private fun Scan.item(translated: Boolean) = QueueItem(
+    /** Each located scan's photo spot, by scan id, from the same places as the map. */
+    private fun spots(): Map<Long, PhotoSpot> =
+        groupPlaces(scans.value).flatMap { place -> place.photoSpot().let { spot -> place.scans.map { it.id to spot } } }.toMap()
+
+    private fun Scan.item(translated: Boolean, spots: Map<Long, PhotoSpot> = spots()) = QueueItem(
         id = id,
         translated = translated,
         title = placeLabel(),
@@ -170,6 +177,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         languageTag = if (translated) translationTag else languageTag,
         // A translation is all in one language; the original may switch language between paragraphs.
         spans = if (translated) emptyList() else spans(),
+        spot = spots[id],
     )
 
     private fun start() = ReaderService.start(app)
@@ -177,7 +185,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     fun playNow(scan: Scan, translated: Boolean = false) { reader.play(scan.item(translated)); start() }
     fun playNext(scan: Scan, translated: Boolean = false) { reader.enqueue(scan.item(translated), next = true); start() }
     fun addToQueue(scan: Scan, translated: Boolean = false) { reader.enqueue(scan.item(translated), next = false); start() }
-    fun playAll(scans: List<Scan>) { reader.playAll(scans.map { it.item(false) }); start() }
+    fun playAll(scans: List<Scan>) { val spots = spots(); reader.playAll(scans.map { it.item(false, spots) }); start() }
 
     val speechReady: StateFlow<Boolean> = reader.speechReady
     fun voicesFor(language: String) = reader.voicesFor(language)

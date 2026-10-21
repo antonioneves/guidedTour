@@ -32,17 +32,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.guidedtour.app.TourViewModel
-import com.guidedtour.app.data.Place
+import com.guidedtour.app.data.PhotoSpot
 import com.guidedtour.app.data.PlacePhoto
 
-/** The photo of [place], once loaded; null while loading, without one, or with photos off. */
+/** The photo of the place at [spot], once loaded; null while loading, without one, or with photos off. */
 @Composable
-fun rememberPlacePhoto(viewModel: TourViewModel, place: Place?): PlacePhoto? {
+fun rememberPlacePhoto(viewModel: TourViewModel, spot: PhotoSpot?): PlacePhoto? {
     val enabled by viewModel.settings.placePhotos.collectAsStateWithLifecycle()
-    // Named after its first scan, so Guides and the map ask the same and share one photo.
-    val name = place?.scans?.firstNotNullOfOrNull { it.placeName }
-    val photo by produceState<PlacePhoto?>(null, enabled, place?.latitude, place?.longitude, name) {
-        value = if (enabled && place != null) viewModel.placePhotos.photo(place.latitude, place.longitude, name) else null
+    val photo by produceState<PlacePhoto?>(null, enabled, spot) {
+        value = if (enabled && spot != null) viewModel.placePhotos.photo(spot) else null
     }
     return photo
 }
