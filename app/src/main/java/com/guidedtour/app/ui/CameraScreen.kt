@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -67,6 +68,8 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -507,7 +510,33 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             }
         }
 
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp))
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp)) { data ->
+            // A pill like the one at the top, with any action ("Turn off") inside it.
+            Surface(
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.6f),
+                contentColor = Color.White,
+                modifier = Modifier.padding(horizontal = 24.dp),
+            ) {
+                Row(
+                    Modifier.padding(start = 20.dp, end = if (data.visuals.actionLabel != null) 6.dp else 20.dp, top = 4.dp, bottom = 4.dp)
+                        .heightIn(min = 40.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        data.visuals.message,
+                        Modifier.weight(1f, fill = false).padding(vertical = 6.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        textAlign = TextAlign.Center,
+                    )
+                    data.visuals.actionLabel?.let { label ->
+                        TextButton(onClick = data::performAction, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.inversePrimary)) {
+                            Text(label)
+                        }
+                    }
+                }
+            }
+        }
         if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
 
         // The torch on the left of the shutter, auto capture on the right, settings in the corner.
@@ -601,7 +630,7 @@ private fun StatusPill(icon: ImageVector, message: String, highlight: Boolean = 
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(icon, null, Modifier.size(20.dp))
-            Text(message, style = MaterialTheme.typography.labelLarge)
+            Text(message, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
         }
     }
 }
