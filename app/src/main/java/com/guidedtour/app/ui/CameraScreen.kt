@@ -30,6 +30,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -533,7 +534,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                         Box(contentAlignment = Alignment.Center) { LoadingIndicator() }
                     }
                 } else {
-                    Shutter(progress = countdown.value, iconAngle = iconAngle, onClick = ::capture)
+                    Shutter(progress = countdown.value, showRing = autoCapture, iconAngle = iconAngle, onClick = ::capture)
                 }
                 CameraToggle(
                     checked = autoCapture,
@@ -633,13 +634,17 @@ private fun hasFlashUnit(context: android.content.Context): Boolean = runCatchin
     }
 }.getOrDefault(false)
 
-/** Shutter with a ring that fills while the automatic capture countdown runs. */
+/**
+ * Shutter with a ring that fills while the automatic capture countdown runs. Without auto capture
+ * there's no countdown, so the ring fades away; the shutter keeps its size so nothing around it moves.
+ */
 @Composable
-private fun Shutter(progress: Float, iconAngle: Float, onClick: () -> Unit) {
+private fun Shutter(progress: Float, showRing: Boolean, iconAngle: Float, onClick: () -> Unit) {
+    val ringAlpha by animateFloatAsState(if (showRing) 1f else 0f, label = "ring")
     Box(Modifier.size(92.dp), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(
             progress = { progress },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = ringAlpha },
             color = ScanGreen,
             trackColor = Color.White.copy(alpha = 0.55f),
             strokeWidth = 5.dp,
