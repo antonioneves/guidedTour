@@ -40,6 +40,9 @@ class Settings private constructor(context: Context) {
     private val _correctWords = MutableStateFlow(prefs.getBoolean("correctWords", true))
     /** Replace words OCR probably misread with the likeliest real word in the text's language. */
     val correctWords: StateFlow<Boolean> = _correctWords
+    private val _aiProofreading = MutableStateFlow(prefs.getBoolean("aiProofreading", true))
+    /** Let on-device AI (where the phone has it) mend misread words too, as one more vote. */
+    val aiProofreading: StateFlow<Boolean> = _aiProofreading
     private val _script = MutableStateFlow(
         OcrScript.entries.firstOrNull { it.name == prefs.getString("script", null) } ?: OcrScript.Auto
     )
@@ -69,6 +72,7 @@ class Settings private constructor(context: Context) {
     fun setVolumeShutter(value: Boolean) { _volumeShutter.value = value; prefs.edit().putBoolean("volumeShutter", value).apply() }
     fun setPlacePhotos(value: Boolean) { _placePhotos.value = value; prefs.edit().putBoolean("placePhotos", value).apply() }
     fun setCorrectWords(value: Boolean) { _correctWords.value = value; prefs.edit().putBoolean("correctWords", value).apply() }
+    fun setAiProofreading(value: Boolean) { _aiProofreading.value = value; prefs.edit().putBoolean("aiProofreading", value).apply() }
     fun setTranslateTo(code: String) { _translateTo.value = code; prefs.edit().putString("translateTo", code).apply() }
     fun setScript(value: OcrScript) { _script.value = value; prefs.edit().putString("script", value.name).apply() }
 }

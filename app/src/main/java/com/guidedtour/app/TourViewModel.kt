@@ -9,13 +9,16 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.guidedtour.app.data.AppDatabase
 import com.guidedtour.app.data.Accuracy
+import com.guidedtour.app.data.AiProofreader
 import com.guidedtour.app.data.CloudOcr
 import com.guidedtour.app.data.WordLists
 import com.guidedtour.app.data.PhotoRegion
 import com.guidedtour.app.data.ViewArea
 import com.guidedtour.app.data.photoRegion
 import com.guidedtour.app.data.readPickedPhoto
+import com.guidedtour.app.data.agreed
 import com.guidedtour.app.data.Locator
+import com.guidedtour.app.data.PersonalWords
 import com.guidedtour.app.data.PhotoSpot
 import com.guidedtour.app.data.PlacePhotos
 import com.guidedtour.app.data.groupPlaces
@@ -44,6 +47,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.Locale
 
@@ -57,6 +61,17 @@ sealed interface ScanState {
 /** Longest side of the photo saved with a scan. */
 private const val SAVED_PHOTO_SIDE = 2400
 
+/** The burst's other photos are kept this big for voting (see [vote]). */
+private const val VOTE_SIDE = 2600
+
+/** What a reading's vote counts: the sharpest photo's, another photo's, one of the live preview's. */
+private const val SHARPEST_VOTE = 1.2f
+private const val PHOTO_VOTE = 1f
+private const val LIVE_VOTE = 0.4f
+
+/** How long a scan waits for the place's words from Wikipedia (only the first scan there asks). */
+private const val PLACE_WORDS_WAIT_MS = 3_000L
+
 /** A picked photo taken this recently is placed where the phone is now. */
 private const val RECENT_PHOTO_MS = 2 * 60 * 60 * 1000L
 
@@ -67,6 +82,8 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     val settings = Settings.get(app)
     val placePhotos = PlacePhotos.get(app)
     private val wordLists = WordLists.get(app)
+    private val personalWords = PersonalWords.get(app)
+    val aiProofreader = AiProofreader.get(app)
 
     // Loaded from the start, so Guides rarely opens before the database has been read; null until then.
     private val loadedScans: StateFlow<List<Scan>?> = dao.observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -94,6 +111,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         // A word list takes about a second to load: have the likely languages ready before the first scan.
         viewModelScope.launch(Dispatchers.Default) {
             delay(3_000)
+            android.util.Log.i("GuidedTour", "ai proofreading: ${aiProofreader.status()}")
             if (!settings.correctWords.value) return@launch
             val recent = loadedScans.filterNotNull().first().take(20).mapNotNull { it.languageTag }
             (listOf(Locale.getDefault().language) + recent).distinct().take(2).forEach { wordLists.of(it) }
@@ -109,6 +127,8 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     // Careful capture takes several photos; we keep only the sharpest to save memory.
     private var bestFrame: Bitmap? = null
     private var bestSharpness = -1.0
+    /** The burst's other photos, smaller, to vote on the sharpest one's words. */
+    private val otherFrames = mutableListOf<Bitmap>()
 
     /** Starts a capture. Returns false if one is already being processed. */
     fun beginCapture(): Boolean {
@@ -117,6 +137,8 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         bestFrame?.recycle()
         bestFrame = null
         bestSharpness = -1.0
+        otherFrames.forEach { it.recycle() }
+        otherFrames.clear()
         return true
     }
 
@@ -124,25 +146,32 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     suspend fun addFrame(image: ImageProxy) {
         val bitmap = runCatching { Recognizer.toUprightBitmap(image) }.getOrNull() ?: return
         val sharpness = withContext(Dispatchers.Default) { Recognizer.sharpness(bitmap) }
-        if (sharpness > bestSharpness) {
-            bestFrame?.recycle()
-            bestFrame = bitmap
-            bestSharpness = sharpness
-        } else {
-            bitmap.recycle()
+        val other = if (sharpness > bestSharpness) bestFrame.also { bestFrame = bitmap; bestSharpness = sharpness } else bitmap
+        if (other != null) {
+            otherFrames += withContext(Dispatchers.Default) { Recognizer.shrunk(other, VOTE_SIDE) }.also { if (it !== other) other.recycle() }
         }
     }
 
     /**
      * Reads the sharpest photo: only what the preview showed ([shown], the whole preview), and within
      * it only the [aimed] text frames if there are any, with the [skipped] ones blanked out; if that
-     * finds nothing, falls back to [liveText] seen in the preview. The photo is saved as the preview
-     * showed it: the camera takes in more at the sides (or top and bottom) than a phone screen shows.
+     * finds nothing, falls back to [liveText] seen in the preview. Where it isn't sure of words, the
+     * burst's other photos and the preview's [liveReadings] vote on them (see [vote]). The photo is
+     * saved as the preview showed it: the camera takes in more at the sides (or top and bottom) than a
+     * phone screen shows.
      */
-    fun finishCapture(liveText: String, aimed: List<ViewArea> = emptyList(), skipped: List<ViewArea> = emptyList(), shown: ViewArea? = null) {
+    fun finishCapture(
+        liveText: String,
+        aimed: List<ViewArea> = emptyList(),
+        skipped: List<ViewArea> = emptyList(),
+        shown: ViewArea? = null,
+        liveReadings: List<String> = emptyList(),
+    ) {
         val taken = bestFrame
         bestFrame = null
         bestSharpness = -1.0
+        val burst = otherFrames.toList()
+        otherFrames.clear()
         viewModelScope.launch {
             if (taken == null) {
                 persist(liveText, null, emptySet())
@@ -160,11 +189,22 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
                 }
                 val chosen = aimed.isNotEmpty() || skipped.isNotEmpty()
                 val reading = Recognizer.read(frame, settings.script.value, region = region, skipped = skip, chosen = chosen)
+                // Words OCR wasn't sure of: the burst's other photos (a quick reading of the same text) and
+                // the preview's last readings vote on them.
+                val others = if (reading.unsure.isEmpty()) emptyList() else {
+                    burst.map { other ->
+                        val seen = visible?.let { Recognizer.cropped(other, it) } ?: other
+                        Recognizer.read(seen, settings.script.value, enhance = false, region = region, skipped = skip, chosen = chosen).text
+                            .also { if (seen !== other) seen.recycle() } to PHOTO_VOTE
+                    } + liveReadings.map { it to LIVE_VOTE }
+                }
+                val text = agreed(reading, others, wordLists, SHARPEST_VOTE)
+                burst.forEach { it.recycle() }
                 // Save the photo the way the text reads, if it had to be turned.
                 val photo = if (reading.turn == 0) frame else withContext(Dispatchers.Default) {
                     Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, android.graphics.Matrix().apply { postRotate(reading.turn.toFloat()) }, true)
                 }
-                if (reading.text.isBlank()) persist(liveText, photo, emptySet()) else persist(reading.text, photo, reading.unsure)
+                if (text.isBlank()) persist(liveText, photo, emptySet()) else persist(text, photo, reading.unsure)
                 if (frame !== taken) taken.recycle()
             }
         }
@@ -190,7 +230,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
             }
             val recent = picked.taken == null || System.currentTimeMillis() - picked.taken < RECENT_PHOTO_MS
             val position = if (picked.latitude != null && picked.longitude != null) picked.latitude to picked.longitude else null
-            persist(reading.text, photo, reading.unsure, taken = picked.taken, position = position, here = position == null && recent)
+            persist(agreed(reading, emptyList(), wordLists), photo, reading.unsure, taken = picked.taken, position = position, here = position == null && recent)
         }
     }
 
@@ -215,7 +255,21 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         val location = position ?: if (here) locator.current()?.let { it.latitude to it.longitude } else null
         val spot = location?.let { locator.spot(it.first, it.second) }
         var spans = Recognizer.detectLanguages(read, spot?.countryCode)
-        val text = if (settings.correctWords.value) withContext(Dispatchers.Default) { wordLists.correct(read, spans, unsure) } else read
+        val text = if (settings.correctWords.value) {
+            // The place's own words (from Wikipedia, if place photos are allowed to ask it) and the
+            // user's, so names on its plaques are recognised and mended.
+            val placeWords = location?.takeIf { settings.placePhotos.value }?.let { (lat, lng) ->
+                withTimeoutOrNull(PLACE_WORDS_WAIT_MS) { placePhotos.words(PhotoSpot(lat, lng, spot?.name)) }
+            }.orEmpty()
+            // On-device AI proofreading first, where the phone has it, then the word lists.
+            val list = mainLanguage(read, spans)?.let(wordLists::of)
+            val proofread = if (!settings.aiProofreading.value) read else {
+                aiProofreader.proofread(read, mainLanguage(read, spans), unsure) { word -> list != null && list.frequency(word) >= 0 }
+            }
+            withContext(Dispatchers.Default) { wordLists.correct(proofread, spans, unsure, personalWords.words + placeWords) }
+        } else {
+            read
+        }
         // Corrected words change where each language starts, and may make it clearer.
         if (text != read) spans = Recognizer.detectLanguages(text, spot?.countryCode)
         val now = System.currentTimeMillis()
@@ -310,10 +364,15 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
      * Fixes OCR mistakes. Clears any stale translation and detects the languages again, unless the
      * user chose the language by hand.
      */
-    fun editText(scan: Scan, newText: String) {
+    /** Saves [newText] as [scan]'s text; if the user typed it ([byUser]), names in it are learned for later scans. */
+    fun editText(scan: Scan, newText: String, byUser: Boolean = true) {
         val text = newText.trim()
         if (text.isEmpty() || text == scan.text) return
         viewModelScope.launch {
+            if (byUser) withContext(Dispatchers.Default) {
+                val list = scan.languageTag?.let(wordLists::of)
+                personalWords.learn(scan.text, text) { word -> list != null && list.frequency(word) >= 0 }
+            }
             val spans = if (scan.languageFixed) emptyList() else Recognizer.detectLanguages(text, scan.country())
             val language = mainLanguage(text, spans) ?: scan.languageTag
             val languages = encodeSpans(spans)
@@ -359,7 +418,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         _cloudReading.value += scan.id
         viewModelScope.launch {
             when (val result = CloudOcr.read(photo)) {
-                is CloudOcr.Result.Text -> editText(scan, result.text)
+                is CloudOcr.Result.Text -> editText(scan, result.text, byUser = false)
                 is CloudOcr.Result.Failure -> _messages.tryEmit(result.message)
             }
             _cloudReading.value -= scan.id

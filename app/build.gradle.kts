@@ -99,6 +99,7 @@ dependencies {
     implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
     implementation("com.google.mlkit:language-id:17.0.6")
     implementation("com.google.mlkit:translate:17.0.3")
+    implementation("com.google.mlkit:genai-proofreading:1.0.0-beta1")
 
     // Lock-screen / Bluetooth media controls
     implementation("androidx.media:media:1.7.0")

@@ -49,6 +49,7 @@ private val CREDIT_SECTIONS = listOf(
         Credit("Android Geocoder", "Place names for the places visited", "https://developer.android.com/reference/android/location/Geocoder"),
         Credit("Wikipedia and Wikimedia Commons", "Photos of places, each credited to its author under its own free licence", "https://commons.wikimedia.org/wiki/Commons:Reusing_content_outside_Wikimedia"),
         Credit("wordfreq", "Word lists that correct misread words, by Robyn Speer, under CC BY-SA 4.0", "https://github.com/rspeer/wordfreq"),
+        Credit("Gemini Nano", "On-device AI proofreading, where the phone offers it through AICore", "https://developers.google.com/ml-kit/genai/proofreading/android"),
     ),
     "Built with" to listOf(
         Credit("CameraX", "The camera, under the Apache 2.0 licence", "https://developer.android.com/media/camera/camerax"),

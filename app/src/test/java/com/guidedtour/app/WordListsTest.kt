@@ -43,6 +43,24 @@ class WordListsTest {
         assertEquals("do not oflow people", fix("do not oflow people", setOf("oflow")))
     }
 
+    @Test fun oneLetterNonWordsBecomeTheLookalikeThatIs() {
+        assertEquals("in a controlled manner", fix("in e controlled manner", setOf("e")))
+        assertEquals("in a controlled manner", fix("in o controlled manner", setOf("o")))
+        // Sure of it, or a real one-letter word: left alone.
+        assertEquals("in e controlled manner", fix("in e controlled manner", emptySet()))
+        assertEquals("O templo foi construído", fix("O templo foi construído", setOf("o"), "pt"))
+    }
+
+    @Test fun thePlacesOwnWordsMendNamesAndCountAsKnown() {
+        val place = setOf("erechtheion", "caryatids")
+        fun withPlace(text: String, unsure: Set<String>) = correctWords(text, listOf(LanguageSpan(0, "en")), unsure, place) { lists[it] }
+        // A misread name, mended into the place's word for it; without it, left alone as a name.
+        assertEquals("the porch of the Erechtheion", withPlace("the porch of the Erechtheiom", setOf("erechtheiom")))
+        assertEquals("the porch of the Erechtheiom", fix("the porch of the Erechtheiom", setOf("erechtheiom")))
+        // A word only the place knows isn't "corrected" into a common one.
+        assertEquals("the caryatids stand", withPlace("the caryatids stand", setOf("caryatids")))
+    }
+
     @Test fun keepsCaseOfTheMisreadWord() {
         assertEquals("THE TEMPLE", fix("THE TCMPLE", setOf("tcmple")))
         assertEquals("Temple of Zeus", fix("Tcmple of Zeus", setOf("tcmple")))

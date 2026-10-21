@@ -16,9 +16,14 @@ scanned, and reads it aloud, also with the screen off.
   between the phone's cameras (ultra-wide, main, 2×, front), and night mode where the phone offers
   it. Capture with the shutter button or the volume key, or let it capture
   automatically once the text looks readable. Optionally takes three photos and keeps the sharpest.
-- **Correct misread words**: words the camera wasn't sure of, and that aren't real words in their
-  paragraph's language, are replaced by the likeliest common word one OCR slip away ("tcmple" →
-  "temple", "construido" → "construído"). Uses word lists on the phone for about 30 languages.
+- **Correct misread words**: several readings vote on each word: the sharpest photo's, the burst's
+  other photos', the live preview's, its unsure lines read again on their own and enlarged, and a
+  reading with contrast raised tile by tile; where they tie, a real word wins. Then words that
+  aren't real words in their paragraph's language become the likeliest common word one OCR slip
+  away ("tcmple" → "temple", "construido" → "construído", "in e controlled" → "in a controlled"),
+  using word lists on the phone for about 30 languages, the words of the place's Wikipedia
+  articles (so its names are recognised and mended) and the words you typed when correcting a
+  guide. On phones with Gemini Nano, on-device AI proofreading can mend them too.
 - **From the gallery**: the button left of the shutter reads a photo already on the phone, dated
   when it was taken.
 - **Read aloud**: sentence by sentence, with the current word highlighted. Plays in the
@@ -110,7 +115,7 @@ The result is written to `app/src/release/generated/baselineProfiles/`; commit i
 ./gradlew :app:testDebugUnitTest
 ```
 
-Unit tests cover text layout and clean-up, misread-word correction, perspective, sentence splitting, photo tips, analysis throttling
+Unit tests cover text layout and clean-up, misread-word correction, voting between readings, text frames, perspective, sentence splitting, photo tips, analysis throttling
 and visit grouping.
 
 **OCR accuracy**: `tools/make_ocr_testset.py` generates synthetic plaque photos with their true
@@ -128,7 +133,9 @@ adb shell am instrument -w -e class com.guidedtour.app.AccuracyTest \
 `.github/workflows/tests.yml` runs the unit tests and this instrumented test (on an emulator) on
 every push and pull request.
 
-The report also shows the error after misread words are corrected, and each word it changed. Another
+The report also shows the error after misread words are corrected, each word it changed, and the
+share of the expected words found in any order ("words found"), which also works when the `.txt`
+holds only an excerpt of the text. Another
 folder of photos can be given with `-e dir /data/local/tmp/other`.
 
 To regenerate the word lists (after a wordfreq update), run `pip install wordfreq` and

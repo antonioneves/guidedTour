@@ -3,6 +3,7 @@ package com.guidedtour.app
 import com.guidedtour.app.data.OcrBlock
 import com.guidedtour.app.data.OcrLine
 import com.guidedtour.app.data.characterErrorRate
+import com.guidedtour.app.data.wordsFound
 import com.guidedtour.app.data.cleanOcr
 import com.guidedtour.app.data.dropIntruders
 import com.guidedtour.app.data.dropNoise
@@ -123,6 +124,12 @@ class OcrLayoutTest {
         assertEquals(0.0, characterErrorRate("hello  world", "hello world"), 0.0)
         assertEquals(0.2, characterErrorRate("hello", "hallo"), 0.0001)
         assertEquals(1.0, characterErrorRate("abc", ""), 0.0)
+    }
+
+    @Test fun wordsFoundIgnoresOrderExtraTextAndCase() {
+        assertEquals(1.0, wordsFound("Bitte keine Bügel", "Danke. BITTE, keine Bügel auf die Schränke legen!"), 1e-9)
+        assertEquals(1.0 / 3, wordsFound("the temple the", "Temple tcmple"), 1e-9)
+        assertEquals(1.0 / 3, wordsFound("to be or", "be"), 1e-9)
     }
 
     @Test fun sharpImageScoresHigherThanBlurred() {

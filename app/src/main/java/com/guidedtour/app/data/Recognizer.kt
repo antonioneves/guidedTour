@@ -34,7 +34,15 @@ import kotlin.math.min
  * [turn] is how far, in degrees clockwise, the photo had to be turned for the text to read upright;
  * [unsure] are the words the engine wasn't sure of, lowercase.
  */
-class Reading(val text: String, val confidence: Float, val letters: Int, val turn: Int = 0, val unsure: Set<String> = emptySet()) {
+class Reading(
+    val text: String,
+    val confidence: Float,
+    val letters: Int,
+    val turn: Int = 0,
+    val unsure: Set<String> = emptySet(),
+    /** The same text with its least sure lines read again on their own (see [vote]). */
+    val alternatives: List<String> = emptyList(),
+) {
     val isEmpty: Boolean get() = text.isBlank()
 }
 
@@ -69,6 +77,21 @@ object Recognizer {
 
     /** Enlarging more than this only blurs. */
     private const val MAX_ZOOM = 3f
+
+    /** Contrast is raised in this many tiles across and down (see [contrast]). */
+    private const val TILES = 8
+
+    /** A tile's contrast is raised at most this much. */
+    private const val MAX_GAIN = 4f
+
+    /** Lines ML Kit is less sure of than this are read again on their own (see [rereadUnsure]). */
+    private const val REREAD_CONFIDENCE = 0.75f
+
+    /** At most this many lines are read again: each takes a moment. */
+    private const val MAX_REREADS = 10
+
+    /** Lines read again are enlarged so their letters are about this many pixels tall. */
+    private const val REREAD_LETTER = 64f
 
     private val clients = HashMap<OcrScript, TextRecognizer>()
     private val languageId by lazy { LanguageIdentification.getClient() }
@@ -180,6 +203,7 @@ object Recognizer {
             }
         }
         var best = first.reading
+        var alternatives = emptyList<String>()
         if (enhance && first.kept.isNotEmpty()) {
             if (photo !== overview) {
                 // The text area again, from the full photo.
@@ -198,17 +222,80 @@ object Recognizer {
             }
             // Straighten or crop around the kept text only, so neighbouring plaques fall outside.
             val improved = withContext(Dispatchers.Default) { enhanced(source, first.kept) }
-            val second = Pass(first.script, recognize(client(first.script), improved), improved.width, improved.height, filter).reading
+            val second = Pass(first.script, recognize(client(first.script), improved), improved.width, improved.height, filter)
+            val (bestPass, bestImage) = if (isBetter(second.reading, best)) second to improved else first to source
+            best = bestPass.reading
+            // The lines it wasn't sure of, again, each on its own and enlarged: a second opinion to vote with.
+            val reread = rereadUnsure(bestPass, bestImage)
+            // The same with contrast raised tile by tile instead: right in other places, so a third vote.
+            val evenedImage = withContext(Dispatchers.Default) { enhanced(source, first.kept, local = true) }
+            val evened = Pass(first.script, recognize(client(first.script), evenedImage), evenedImage.width, evenedImage.height, filter)
+                .reading.text.takeIf { it.isNotBlank() }
+            evenedImage.recycle()
+            alternatives = listOfNotNull(reread, evened)
             improved.recycle()
-            if (isBetter(second, best)) best = second
         }
         if (source !== overview && source !== photo) source.recycle()
         if (overview !== photo) overview.recycle()
-        return Reading(best.text, best.confidence, best.letters, turn, best.unsure)
+        return Reading(best.text, best.confidence, best.letters, turn, best.unsure, alternatives)
+    }
+
+    /**
+     * [pass]'s text with the lines ML Kit was least sure of read again from [image], each cut out on
+     * its own with a margin, enlarged towards [REREAD_LETTER] and contrast raised: small print often reads
+     * better alone and large. ML Kit's confidence hardly tells which reading is right, so this is a
+     * second opinion for [vote], where real words win ties. A line read again is used if it's about as
+     * long as before. Null if no line read differently.
+     */
+    private suspend fun rereadUnsure(pass: Pass, image: Bitmap): String? {
+        val unsure = pass.kept.flatMap { it.lines }
+            .filter { it.confidence < REREAD_CONFIDENCE && it.text.count(Char::isLetter) >= 3 }
+            .sortedBy { it.confidence }.take(MAX_REREADS)
+        if (unsure.isEmpty()) return null
+        val replaced = java.util.IdentityHashMap<OcrLine, OcrLine>()
+        for (line in unsure) {
+            val crop = withContext(Dispatchers.Default) { lineImage(image, line) } ?: continue
+            val found = recognize(client(pass.script), crop).flatMap { it.lines }
+            val middle = crop.height / 2
+            crop.recycle()
+            // The line itself, not a neighbour's edge caught in the margin.
+            val read = found.filter { middle in it.top..it.bottom }.sortedBy { it.left }
+            if (read.isEmpty()) continue
+            val text = read.joinToString(" ") { it.text }
+            val letters = read.sumOf { it.text.length }
+            val confidence = read.sumOf { (it.confidence * it.text.length).toDouble() }.toFloat() / max(1, letters)
+            val before = line.text.count(Char::isLetter)
+            val after = text.count(Char::isLetter)
+            if (text != line.text && after >= before * 0.8 && after <= before * 1.3) {
+                replaced[line] = line.copy(text = text, confidence = confidence, words = read.flatMap { it.words }, wordBoxes = emptyList())
+            }
+        }
+        if (replaced.isEmpty()) return null
+        val blocks = pass.blocks.map { block -> OcrBlock(block.lines.map { replaced[it] ?: it }) }
+        return Pass(pass.script, blocks, pass.width, pass.height, pass.filter).reading.text
+    }
+
+    /** [line] cut out of [image] with a margin, enlarged so its letters are about [REREAD_LETTER] tall, on a border of its own background. */
+    private fun lineImage(image: Bitmap, line: OcrLine): Bitmap? {
+        val size = max(1, line.size)
+        val left = max(0, line.left - size / 2)
+        val top = max(0, line.top - size * 35 / 100)
+        val right = min(image.width, line.right + size / 2)
+        val bottom = min(image.height, line.bottom + size * 35 / 100)
+        if (right - left < 8 || bottom - top < 8) return null
+        val scale = (REREAD_LETTER / size).coerceIn(1f, MAX_ZOOM + 1f).let { min(it, MAX_SIDE.toFloat() / (right - left)) }
+        val border = (size * scale).toInt()
+        val width = ((right - left) * scale).toInt()
+        val height = ((bottom - top) * scale).toInt()
+        val out = createBitmap(width + 2 * border, height + 2 * border)
+        val canvas = Canvas(out)
+        canvas.drawColor(image[left, top])
+        canvas.drawBitmap(image, android.graphics.Rect(left, top, right, bottom), RectF(border.toFloat(), border.toFloat(), (border + width).toFloat(), (border + height).toFloat()), Paint(Paint.FILTER_BITMAP_FLAG))
+        return contrast(out).also { out.recycle() }
     }
 
     /** [bitmap] scaled down to [side] on its long side, or itself if it's no bigger. */
-    private fun shrunk(bitmap: Bitmap, side: Int): Bitmap {
+    fun shrunk(bitmap: Bitmap, side: Int): Bitmap {
         val scale = side.toFloat() / max(bitmap.width, bitmap.height)
         return if (scale >= 1f) bitmap else bitmap.scale((bitmap.width * scale).toInt(), (bitmap.height * scale).toInt())
     }
@@ -285,7 +372,7 @@ object Recognizer {
      * A copy of [bitmap] cropped to the text, with text seen at an angle stretched back square or
      * tilted text straightened, small letters enlarged, and contrast raised.
      */
-    private fun enhanced(bitmap: Bitmap, blocks: List<OcrBlock>): Bitmap {
+    private fun enhanced(bitmap: Bitmap, blocks: List<OcrBlock>, local: Boolean = false): Bitmap {
         val lines = blocks.flatMap { it.lines }
         val tilt = lines.map { it.angle }.sorted()[lines.size / 2]
         // Small letters read poorly: enlarge them towards SHARP_LETTER, as far as MAX_SIDE allows.
@@ -296,7 +383,7 @@ object Recognizer {
             val straight = if (abs(tilt) in 2f..30f) rotated(crop, -tilt).also { if (crop !== bitmap) crop.recycle() } else crop
             enlarged(straight, zoom).also { if (it !== straight && straight !== bitmap) straight.recycle() }
         }
-        return contrast(source).also { if (source !== bitmap) source.recycle() }
+        return contrast(source, local).also { if (source !== bitmap) source.recycle() }
     }
 
     /** [bitmap] cropped to [lines] with a margin, unless they fill most of it anyway. */
@@ -353,7 +440,68 @@ object Recognizer {
         return out
     }
 
-    private fun contrast(bitmap: Bitmap, factor: Float = 1.4f): Bitmap {
+    /**
+     * [bitmap] in grey with its contrast raised: over the whole image at once, or if [local] tile by
+     * tile: each of [TILES] × [TILES] tiles is
+     * stretched from its own dark to its own light (2% and 98% of it), blended smoothly between tiles,
+     * and never stretched more than [MAX_GAIN] times. Light falls unevenly on plaques (a shadow, glare,
+     * a lamp), so one setting for the whole photo leaves some of it grey on grey.
+     */
+    private fun contrast(bitmap: Bitmap, local: Boolean = false): Bitmap {
+        if (!local) return globalContrast(bitmap)
+        val w = bitmap.width
+        val h = bitmap.height
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+        val luma = IntArray(pixels.size) { i ->
+            val p = pixels[i]
+            (((p shr 16) and 0xff) * 77 + ((p shr 8) and 0xff) * 150 + (p and 0xff) * 29) shr 8
+        }
+        val tw = (w + TILES - 1) / TILES
+        val th = (h + TILES - 1) / TILES
+        val low = FloatArray(TILES * TILES)
+        val high = FloatArray(TILES * TILES)
+        val histogram = IntArray(256)
+        for (ty in 0 until TILES) for (tx in 0 until TILES) {
+            histogram.fill(0)
+            var count = 0
+            for (y in ty * th until min(h, (ty + 1) * th)) for (x in tx * tw until min(w, (tx + 1) * tw)) {
+                histogram[luma[y * w + x]]++
+                count++
+            }
+            var seen = 0
+            var lo = 0
+            var hi = 255
+            for (v in 0..255) { seen += histogram[v]; if (seen >= count * 0.02) { lo = v; break } }
+            seen = 0
+            for (v in 255 downTo 0) { seen += histogram[v]; if (seen >= count * 0.02) { hi = v; break } }
+            // A tile with no ink in it (plain wall) isn't stretched into noise.
+            val span = max(hi - lo, 255 / MAX_GAIN.toInt())
+            val mid = (hi + lo) / 2f
+            low[ty * TILES + tx] = mid - span / 2f
+            high[ty * TILES + tx] = mid + span / 2f
+        }
+        for (y in 0 until h) {
+            val fy = ((y + 0.5f) / th - 0.5f).coerceIn(0f, TILES - 1f)
+            val y0 = fy.toInt().coerceAtMost(TILES - 2).coerceAtLeast(0)
+            val dy = fy - y0
+            for (x in 0 until w) {
+                val fx = ((x + 0.5f) / tw - 0.5f).coerceIn(0f, TILES - 1f)
+                val x0 = fx.toInt().coerceAtMost(TILES - 2).coerceAtLeast(0)
+                val dx = fx - x0
+                fun at(a: FloatArray, tx: Int, ty: Int) = a[ty * TILES + tx]
+                fun blend(a: FloatArray) = (at(a, x0, y0) * (1 - dx) + at(a, x0 + 1, y0) * dx) * (1 - dy) +
+                    (at(a, x0, y0 + 1) * (1 - dx) + at(a, x0 + 1, y0 + 1) * dx) * dy
+                val lo = blend(low)
+                val hi = blend(high)
+                val v = ((luma[y * w + x] - lo) * 255f / max(1f, hi - lo)).toInt().coerceIn(0, 255)
+                pixels[y * w + x] = (0xff shl 24) or (v shl 16) or (v shl 8) or v
+            }
+        }
+        return createBitmap(w, h).also { it.setPixels(pixels, 0, w, 0, 0, w, h) }
+    }
+
+    private fun globalContrast(bitmap: Bitmap, factor: Float = 1.4f): Bitmap {
         val offset = 128f * (1f - factor)
         val matrix = ColorMatrix().apply {
             setSaturation(0f)

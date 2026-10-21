@@ -20,6 +20,27 @@ fun characterErrorRate(expected: String, actual: String): Double {
     return previous[b.length].toDouble() / a.length
 }
 
+/**
+ * Share of [expected]'s words found in [actual], in any order, each as often as it's expected
+ * (case and punctuation aside). Unlike [characterErrorRate] it works with an excerpt of the text as
+ * [expected], and doesn't count reading order.
+ */
+fun wordsFound(expected: String, actual: String): Double {
+    fun words(text: String) = Regex("""[\p{L}\p{M}\p{N}]+""").findAll(text.lowercase()).map { it.value }.toList()
+    val want = words(expected)
+    if (want.isEmpty()) return 1.0
+    val have = words(actual).groupingBy { it }.eachCount().toMutableMap()
+    var found = 0
+    for (word in want) {
+        val left = have[word] ?: 0
+        if (left > 0) {
+            found++
+            have[word] = left - 1
+        }
+    }
+    return found.toDouble() / want.size
+}
+
 /** Variance of the Laplacian of a grayscale image: higher means sharper. [luma] holds 0..255 values row by row. */
 fun laplacianVariance(luma: IntArray, width: Int, height: Int): Double {
     if (width < 3 || height < 3) return 0.0

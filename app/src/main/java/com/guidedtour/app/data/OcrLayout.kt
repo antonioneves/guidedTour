@@ -110,16 +110,50 @@ private fun orderColumns(blocks: List<OcrBlock>): List<OcrBlock> {
 /**
  * Keeps the text the camera was aimed at and drops pieces of neighbouring plaques. Blocks that lie
  * close together (gaps of a few line heights) form one group; each group scores its amount of text,
- * less if it is far from the middle of the photo or cut off at its left or right edge. Groups
- * scoring under half the best are dropped. [width] and [height] are the photo's size.
+ * less if it is far from the middle of the photo or cut off at its edge. The best-scoring group that
+ * reads about as clearly as the clearest one is the main text. Another group is dropped if it's cut
+ * off by the photo's edge (the next plaque) or if it has little text in letters of another size (a
+ * sign beside the plaque), and its blocks that read much less clearly than the main text go too (a
+ * blurry facing page, tiny labels of a chart); the rest stay, as columns and sections of the same
+ * page often lie far apart.
+ * [width] and [height] are the photo's size.
  */
 fun dropIntruders(blocks: List<OcrBlock>, width: Int, height: Int): List<OcrBlock> {
     if (blocks.size < 2 || width <= 0 || height <= 0) return blocks
     val groups = groupsOf(blocks)
     if (groups.size < 2) return blocks
     val scores = groups.map { groupScore(it, width, height) }
-    val best = scores.max()
-    return groups.filterIndexed { i, _ -> scores[i] >= best * 0.5 }.flatten().sortedBy { blocks.indexOf(it) }
+    val clarity = groups.map(::confidenceOf)
+    val clearest = clarity.max()
+    val main = groups.indices.filter { clarity[it] >= clearest - CLARITY_SPREAD }.maxBy { scores[it] }
+    val size = textSize(groups[main])
+    val kept = groups.indices.filter { i ->
+        if (i == main) return@filter true
+        val other = textSize(groups[i]).let { it < size * 0.7 || it > size / 0.7 }
+        val stray = scores[i] < scores[main] * 0.2 && other
+        !cutOff(groups[i], width, height) && !stray
+    }
+    // Outside the main text, blocks read much less clearly go, block by block: a clear title can sit
+    // right beside a blurry facing page.
+    val clear = clarity[main] - CLARITY_SPREAD
+    return kept.flatMap { i -> if (i == main) groups[i] else groups[i].filter { confidenceOf(listOf(it)) >= clear } }
+        .sortedBy { blocks.indexOf(it) }
+}
+
+/** Groups read less clearly than the clearest by more than this are doubtful (see [dropIntruders]). */
+private const val CLARITY_SPREAD = 0.2
+
+/** How sure ML Kit was of [group]'s text, weighted by how much text each line holds. */
+private fun confidenceOf(group: List<OcrBlock>): Double = meanConfidence(group).toDouble()
+
+/** The letter size most of [group]'s text is in. */
+private fun textSize(group: List<OcrBlock>): Int = mainTextSize(group)
+
+/** Every block of [group] touches the photo's edge: it goes on outside the photo. */
+private fun cutOff(group: List<OcrBlock>, width: Int, height: Int): Boolean {
+    val mx = width * 0.015
+    val my = height * 0.015
+    return group.all { it.left <= mx || it.right >= width - mx || it.top <= my || it.bottom >= height - my }
 }
 
 internal fun groupsOf(blocks: List<OcrBlock>): List<List<OcrBlock>> {
@@ -145,9 +179,7 @@ private fun groupScore(group: List<OcrBlock>, width: Int, height: Int): Double {
     val cx = group.sumOf { (it.left + it.right) / 2.0 * it.text.length } / chars
     val cy = group.sumOf { (it.top + it.bottom) / 2.0 * it.text.length } / chars
     val distance = kotlin.math.hypot(cx - width / 2.0, cy - height / 2.0) / (0.5 * kotlin.math.hypot(width.toDouble(), height.toDouble()))
-    val margin = width * 0.015
-    val cutOff = group.all { it.left <= margin || it.right >= width - margin }
-    return chars * (1 - 0.6 * min(1.0, distance)) * (if (cutOff) 0.5 else 1.0)
+    return chars * (1 - 0.6 * min(1.0, distance)) * (if (cutOff(group, width, height)) 0.5 else 1.0)
 }
 
 /**

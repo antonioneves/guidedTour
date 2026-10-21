@@ -16,11 +16,15 @@ Guided Tour reads text from plaques and labels you photograph and reads it aloud
 - **Maps.** The Places tab loads OpenStreetMap map tiles from [OpenFreeMap](https://openfreemap.org).
   Its servers receive the usual map-loading requests (such as your IP address and the area shown),
   but not your scans or route, which are drawn on the device.
+- **Words you type.** When you correct a guide's text, words in it that no word list knows (mostly
+  names) are kept on your device to recognise them in later scans. They never leave it.
+- **AI proofreading.** On phones that offer Gemini Nano (through Android's AICore), misread words
+  can also be mended by it, on the phone; nothing is sent anywhere.
 - **Photos of places.** Unless you turn off "Photos of places" in Settings, the app asks Wikipedia
-  and Wikimedia Commons for a photo of each place where you scanned. It sends only the place's
-  name and its position rounded to about 100 m, once per place, never your scans or your live
-  position; the photo
-  is then kept on your device. Wikimedia's servers receive the usual request details, such as your
+  and Wikimedia Commons for a photo of each place where you scanned, and for the text of its
+  articles about the place, whose words (names especially) help correct misread words. It sends
+  only the place's name and its position rounded to about 100 m, once per place, never your scans
+  or your live position; the photo and the words are then kept on your device. Wikimedia's servers receive the usual request details, such as your
   IP address.
 - **Language packs.** Translation downloads language models from Google the first time you use a
   language. Only the model download happens online; your text is translated on the device.

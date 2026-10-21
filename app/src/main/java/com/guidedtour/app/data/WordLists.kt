@@ -11,16 +11,16 @@ import java.util.zip.GZIPInputStream
  * A language's common words and how common each is, from wordfreq (see tools/make_wordlists.py).
  * [codes] are 6 × log10(frequency × 10⁹): 0 is one word in a billion, 54 is every word.
  */
-class WordList(private val words: Array<String>, private val codes: ByteArray) {
+class WordList(private val words: Array<String>, private val codes: ByteArray) : Lexicon {
     /** The letters the language's words are written with, to try in place of a misread one. */
-    val letters: CharArray = run {
+    override val letters: CharArray = run {
         val counts = HashMap<Char, Int>()
         words.forEach { word -> word.forEach { counts[it] = (counts[it] ?: 0) + 1 } }
         counts.filterValues { it >= 20 }.keys.sorted().toCharArray()
     }
 
     /** How common [word] (lowercase) is, or -1 if it isn't on the list. */
-    fun frequency(word: String): Int {
+    override fun frequency(word: String): Int {
         val i = words.binarySearch(word)
         return if (i >= 0) codes[i].toInt() else -1
     }
@@ -51,6 +51,31 @@ class WordList(private val words: Array<String>, private val codes: ByteArray) {
     }
 }
 
+/** Words and how common each is (see [WordList]'s codes), and the letters they're written with. */
+interface Lexicon {
+    val letters: CharArray
+    fun frequency(word: String): Int
+}
+
+/**
+ * How common words from [extra] that the language doesn't know count as: the place's own words (from
+ * its Wikipedia article) and the user's (from their edits), mostly names, are as good as a language's
+ * commonest on this plaque.
+ */
+const val EXTRA_WORD = 36
+
+/** Words in [extra] the language does know only get this much commoner (one order of magnitude). */
+const val EXTRA_BOOST = 6
+
+/** [base] with [extra] words (lowercase) added (see [EXTRA_WORD] and [EXTRA_BOOST]). */
+class WithExtra(private val base: Lexicon, val extra: Set<String>) : Lexicon {
+    override val letters: CharArray = (base.letters.toSet() + extra.flatMap { it.toList() }.filter { it.isLetter() }).sorted().toCharArray()
+    override fun frequency(word: String): Int {
+        val known = base.frequency(word)
+        return if (word !in extra) known else if (known < 0) EXTRA_WORD else known + EXTRA_BOOST
+    }
+}
+
 /** The word lists bundled with the app, loaded when a language first needs one. */
 class WordLists private constructor(private val assets: AssetManager) {
     companion object {
@@ -72,9 +97,12 @@ class WordLists private constructor(private val assets: AssetManager) {
             ?.also { loaded.put(name, it) }
     }
 
-    /** [text] with words OCR probably misread replaced by the likeliest real word, each paragraph in its own language. */
-    fun correct(text: String, spans: List<LanguageSpan>, unsure: Set<String>): String =
-        correctWords(text, spans, unsure, ::of)
+    /**
+     * [text] with words OCR probably misread replaced by the likeliest real word, each paragraph in its
+     * own language, also knowing the [extra] words (lowercase): the place's and the user's own.
+     */
+    fun correct(text: String, spans: List<LanguageSpan>, unsure: Set<String>, extra: Set<String> = emptySet()): String =
+        correctWords(text, spans, unsure, extra, ::of)
 }
 
 /** The list that covers language [tag]: Norwegian is Bokmål, Croatian, Bosnian and Serbian share one. */
@@ -110,7 +138,7 @@ private const val AMBIGUOUS = 3
 private val TOKEN = Regex("""[\p{L}\p{M}0-9|]+""")
 
 /** Characters OCR mistakes for each other; swapping them is nearly free. */
-private val LOOKALIKES = listOf("0o", "1l", "1i", "|l", "|i", "li", "5s", "8b", "2z", "ce", "eo", "co", "oa", "ea", "uv", "vw", "ft", "hb", "rn")
+private val LOOKALIKES = listOf("0o", "1l", "1i", "|l", "|i", "li", "5s", "8b", "2z", "ce", "eo", "co", "oa", "ea", "uv", "vw", "ft", "hb", "rn", "mn")
     .flatMap { listOf(it[0] to it[1], it[1] to it[0]) }.toSet()
 
 /** Letter groups OCR reads as one letter, or one letter as two. */
@@ -120,14 +148,22 @@ private val MERGES = listOf("rn" to "m", "cl" to "d", "vv" to "w", "ri" to "n", 
 /**
  * [text] with each word that isn't on its paragraph's word list, and that OCR wasn't sure of (in
  * [unsure], lowercase) or that has a digit in it, replaced by the likeliest common word one slip away.
- * Short words, words that appear twice and names (capitalised inside a sentence) are left alone, and
- * so are paragraphs too garbled to mend a word at a time (see [GARBLED]).
+ * Short words, words that appear twice and names (capitalised inside a sentence) are left alone,
+ * unless a name is one slip from one of the [extra] words; so are paragraphs too garbled to mend a word
+ * at a time (see [GARBLED]). A one-letter word that isn't one in the language becomes the look-alike
+ * that is ("in e controlled manner").
  */
-fun correctWords(text: String, spans: List<LanguageSpan>, unsure: Set<String>, lists: (String) -> WordList?): String {
+fun correctWords(
+    text: String,
+    spans: List<LanguageSpan>,
+    unsure: Set<String>,
+    extra: Set<String> = emptySet(),
+    lists: (String) -> WordList?,
+): String {
     if (spans.isEmpty()) return text
     val counts = TOKEN.findAll(text).groupingBy { it.value.lowercase() }.eachCount()
     return pieces(text, spans).joinToString("") { (tag, piece) ->
-        val list = lists(tag) ?: return@joinToString piece
+        val list: Lexicon = lists(tag)?.let { if (extra.isEmpty()) it else WithExtra(it, extra) } ?: return@joinToString piece
         val garbled = paragraphRanges(piece).filter { garbled(piece.substring(it.first, it.last + 1), list) }
         TOKEN.replace(piece) { match ->
             if (garbled.any { match.range.first in it }) match.value
@@ -145,32 +181,54 @@ private const val GARBLED = 0.4
 /** For telling a garbled paragraph, only words this common count (one in a million): the lists hold plenty of rare oddities like "clo". */
 private const val COMMON = 18
 
-private fun garbled(paragraph: String, list: WordList): Boolean {
+private fun garbled(paragraph: String, list: Lexicon): Boolean {
     // Lowercase words only: capitalised ones are often names, which no list has.
     val words = TOKEN.findAll(paragraph).map { it.value }.filter { w -> w.length >= 3 && w.all { it.isLowerCase() } }.toList()
     return words.size >= 4 && words.count { list.frequency(it.lowercase()) < COMMON } > GARBLED * words.size
 }
 
-private fun corrected(token: String, piece: String, start: Int, list: WordList, unsure: Set<String>, counts: Map<String, Int>): String? {
-    if (token.length < 3 || token.count { it.isLetter() } * 2 < token.length) return null
+private fun corrected(token: String, piece: String, start: Int, list: Lexicon, unsure: Set<String>, counts: Map<String, Int>): String? {
     val lower = token.lowercase()
+    if (token.length == 1 && token[0].isLetter()) return letterFixed(token, lower, list, unsure)
+    if (token.length < 3 || token.count { it.isLetter() } * 2 < token.length) return null
     if ((counts[lower] ?: 0) > 1) return null
     val digits = token.any { it.isDigit() || it == '|' }
     if (!digits && lower !in unsure) return null
     val name = token[0].isUpperCase() && token.drop(1).any { it.isLowerCase() }
-    if (name && !digits && !startsSentence(piece, start)) return null
     val known = list.frequency(lower)
-    val best = if (known >= 0) {
+    val best = (if (name && !digits && !startsSentence(piece, start)) {
+        // A name: only mended into one of the place's or the user's own words, which know it.
+        val extra = (list as? WithExtra)?.extra ?: return null
+        if (lower in extra) return null
+        candidates(lower, list).filter { it.first in extra }.maxByOrNull { it.second }
+    } else if (known >= 0) {
         accented(lower, list).maxByOrNull { it.second }?.takeIf { it.second >= known + ACCENT_GAIN }
     } else {
         val ranked = candidates(lower, list).sortedByDescending { it.second }
         ranked.firstOrNull()?.takeIf { it.second >= MIN_SCORE && (ranked.size < 2 || it.second - ranked[1].second >= AMBIGUOUS) }
-    } ?: return null
+    }) ?: return null
     return when {
         token.filter { it.isLetter() }.all { it.isUpperCase() } && token.count { it.isLetter() } > 1 -> best.first.uppercase()
         token[0].isUpperCase() -> best.first.replaceFirstChar { it.uppercaseChar() }
         else -> best.first
     }
+}
+
+/** One-letter words are this common in their language (one in 300,000 words) or they're not words. */
+private const val LETTER_WORD = 33
+
+/**
+ * A one-letter word OCR wasn't sure of, that isn't one in the language ("e" in English), as the
+ * commonest look-alike letter that is ("a"); case kept.
+ */
+private fun letterFixed(token: String, lower: String, list: Lexicon, unsure: Set<String>): String? {
+    if (lower !in unsure || list.frequency(lower) >= LETTER_WORD) return null
+    val c = lower[0]
+    val best = list.letters.filter { it != c && ((c to it) in LOOKALIKES || base(c) == base(it)) }
+        .map { it.toString() to list.frequency(it.toString()) }
+        .filter { it.second >= LETTER_WORD }
+        .maxByOrNull { it.second }?.first ?: return null
+    return if (token[0].isUpperCase()) best.uppercase() else best
 }
 
 /** Nothing but spaces since a full stop, a line break or the start: a capital here needn't mean a name. */
@@ -185,7 +243,7 @@ private fun startsSentence(piece: String, start: Int): Boolean {
  * digit or mark, a lost thin letter. Any other one-letter change too easily finds a common word
  * that isn't what was written ("buit" isn't "but").
  */
-private fun candidates(word: String, list: WordList): List<Pair<String, Int>> {
+private fun candidates(word: String, list: Lexicon): List<Pair<String, Int>> {
     val found = HashMap<String, Int>()
     fun consider(candidate: String, cost: Int) {
         if (candidate.isEmpty() || candidate == word) return
@@ -217,7 +275,7 @@ private fun candidates(word: String, list: WordList): List<Pair<String, Int>> {
 }
 
 /** Words on the list that are [word] with one letter's accent added or changed, with how common each is. */
-private fun accented(word: String, list: WordList): List<Pair<String, Int>> = word.indices.flatMap { i ->
+private fun accented(word: String, list: Lexicon): List<Pair<String, Int>> = word.indices.flatMap { i ->
     list.letters.filter { it != word[i] && base(it) == base(word[i]) }.mapNotNull { letter ->
         val candidate = word.substring(0, i) + letter + word.substring(i + 1)
         list.frequency(candidate).takeIf { it >= 0 }?.let { candidate to it }

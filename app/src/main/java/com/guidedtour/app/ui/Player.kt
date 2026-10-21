@@ -105,6 +105,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -123,6 +126,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.guidedtour.app.TourViewModel
+import com.guidedtour.app.data.AiProofreader
 import com.guidedtour.app.data.OcrScript
 import com.guidedtour.app.data.PlayerState
 import com.guidedtour.app.data.paragraphsOf
@@ -566,6 +570,7 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            AiProofreadingRow(viewModel)
             SwitchRow(
                 "Correct misread words",
                 "Replaces words the camera misread with the likeliest real word in the text's language, using word lists on the phone.",
@@ -688,6 +693,42 @@ private fun LanguageRow(name: String, selected: Boolean, onClick: () -> Unit) {
     ) {
         RadioButton(selected, null)
         Text(name, Modifier.padding(start = 12.dp), style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+/**
+ * On-device AI proofreading, only where the phone has it: on by default once its model is there;
+ * turning it on downloads the model if it isn't yet.
+ */
+@Composable
+private fun AiProofreadingRow(viewModel: TourViewModel) {
+    val settings = viewModel.settings
+    val on by settings.aiProofreading.collectAsStateWithLifecycle()
+    var status by remember { mutableStateOf<AiProofreader.Status?>(null) }
+    var downloading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { status = viewModel.aiProofreader.status() }
+    val current = status ?: return
+    if (current == AiProofreader.Status.UNAVAILABLE) return
+    val needsDownload = current == AiProofreader.Status.DOWNLOADABLE
+    SwitchRow(
+        "AI proofreading on the phone",
+        when {
+            downloading -> "Downloading the proofreading model…"
+            needsDownload -> "Mends misread words using Gemini Nano on the phone. Needs a one-time download; nothing is sent anywhere."
+            else -> "Mends misread words using Gemini Nano on the phone, only where a word isn't one. Nothing is sent anywhere."
+        },
+        on && !needsDownload,
+    ) { value ->
+        settings.setAiProofreading(value)
+        if (value && needsDownload && !downloading) {
+            downloading = true
+            scope.launch {
+                viewModel.aiProofreader.download()
+                status = viewModel.aiProofreader.status()
+                downloading = false
+            }
+        }
     }
 }
 

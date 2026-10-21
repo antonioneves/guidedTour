@@ -150,6 +150,9 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 private const val AUTO_CAPTURE_MS = 2500L
 private const val IDLE_RELEASE_MS = 20_000L
 private const val CAREFUL_PHOTOS = 3
+
+/** How many of the preview's last readings vote on a photo's words. */
+private const val LIVE_READINGS = 6
 private const val FLASH_MS = 250
 private const val SHRINK_MS = 450
 private const val MIN_HOLD_STILL_MS = 1000L
@@ -313,6 +316,8 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
     // The text in view as frames: the ones to read and the ones skipped, kept steady between preview frames.
     val tracker = remember { FrameTracker() }
     var frames by remember { mutableStateOf<List<ShownFrame>>(emptyList()) }
+    // The preview's last few readings of the framed text, to vote on the photo's words.
+    val liveReadings = remember { ArrayDeque<String>() }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
     val steady by rememberSteady(active = visible)
     val tip = evaluate(frame, viewSize.width, viewSize.height, steady)
@@ -422,6 +427,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             val text = result.getValue(recognizer)
             frame = if (text == null) {
                 frames = tracker.update(emptyList()).map(::ShownFrame)
+                liveReadings.clear()
                 LiveFrame("", emptyList(), brightness, glare)
             } else {
                 // The text as frames (columns, headings, notes aside); only the included ones count for
@@ -443,7 +449,12 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                 val included = tracked.filter { it.shown && it.included }
                 val main = orderBlocks(included.flatMap { it.frame.blocks })
                 val lines = main.flatMap { it.lines }.map { LineBox(it.left, it.top, it.right, it.bottom, it.confidence) }
-                LiveFrame(main.joinToString("\n\n") { it.text }, lines, brightness, glare)
+                val read = main.joinToString("\n\n") { it.text }
+                if (read.isNotBlank() && read != liveReadings.lastOrNull()) {
+                    liveReadings.addLast(read)
+                    if (liveReadings.size > LIVE_READINGS) liveReadings.removeFirst()
+                }
+                LiveFrame(read, lines, brightness, glare)
             }
         }
         controller.setImageAnalysisAnalyzer(analysisExecutor, ThrottledAnalyzer(mlKit, analysisInterval) { b, g -> brightness = b; glare = g })
@@ -486,6 +497,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         if (!visible || !viewModel.beginCapture()) return
         armed = false
         val liveText = frame.text
+        val readings = liveReadings.toList()
         val textLines = frame.lines
         fun area(f: ShownFrame) = ViewArea(f.left, f.top, f.right, f.bottom, viewSize.width, viewSize.height)
         val aimed = frames.filter { it.shown && it.included }.map(::area)
@@ -509,7 +521,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                 Log.i(TAG, "capture: photo ${i + 1} ${if (image != null) "taken" else "failed"} at ${SystemClock.elapsedRealtime() - tapped} ms")
                 if (image != null) viewModel.addFrame(image)
             }
-            viewModel.finishCapture(liveText, aimed, skipped, ViewArea(0f, 0f, viewSize.width.toFloat(), viewSize.height.toFloat(), viewSize.width, viewSize.height))
+            viewModel.finishCapture(liveText, aimed, skipped, ViewArea(0f, 0f, viewSize.width.toFloat(), viewSize.height.toFloat(), viewSize.width, viewSize.height), readings)
             // Keep "Hold still…" up for a moment even when the photos were quick, so it can be read.
             delay((MIN_HOLD_STILL_MS - (SystemClock.elapsedRealtime() - tapped)).coerceAtLeast(0))
             photosTaken = true

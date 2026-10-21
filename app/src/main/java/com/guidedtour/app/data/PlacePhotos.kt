@@ -43,9 +43,10 @@ const val NAMED_RADIUS_M = 1_000
 private const val RETRY_NONE_MS = 30L * 24 * 60 * 60 * 1000
 
 /**
- * Photos of the places where guides were scanned. First choice is the place's own Wikipedia
- * article, the one titled with its name (as the geocoder gave it), if it's nearby: its lead photo,
- * or its Wikidata photo when the lead image is a logo or a map. Otherwise, the lead photo of the most
+ * Photos of the places where guides were scanned, and (see [words]) the words their plaques likely
+ * use. First choice for the photo is the place's own Wikipedia article, the one titled with its
+ * name (as the geocoder gave it), if it's nearby: its lead photo, or its Wikidata photo when the
+ * lead image is a logo or a map. Otherwise, the lead photo of the most
  * notable article nearby (the longest, weighed down by distance), so a scan in the Louvre shows the
  * Louvre rather than a diamond on display in it. Only files on Wikimedia Commons are used, which are
  * freely licensed. Each place is asked about once, by its name and its position rounded to about
@@ -58,6 +59,9 @@ class PlacePhotos private constructor(context: Context) {
             instance ?: synchronized(this) { instance ?: PlacePhotos(context.applicationContext).also { instance = it } }
 
         private const val USER_AGENT = "GuidedTour/1.0 (https://github.com/antonioneves/guidedTour)"
+        private val WORD = Regex("""[\p{L}\p{M}]{3,}""")
+        /** A long article has a few thousand different words; more only slows correction down. */
+        private const val MAX_PLACE_WORDS = 6_000
     }
 
     private val dir = File(context.filesDir, "place_photos").apply { mkdirs() }
@@ -81,6 +85,60 @@ class PlacePhotos private constructor(context: Context) {
                 memory.get(key) ?: (load(key) ?: fetch(key, lat, lng, name)?.let { load(key) })?.also { memory.put(key, it) }
             }
         }
+    }
+
+    /**
+     * Words from the Wikipedia articles about the place at [spot] and around it (its own article in
+     * full, the introductions of the most notable ones nearby), lowercase: the names on its plaques
+     * (Erechtheion, Pericles, Caryatids) for recognising and mending them. Asked once per place and
+     * kept, like its photo; empty when offline (asked again next time).
+     */
+    suspend fun words(spot: PhotoSpot): Set<String> = withContext(Dispatchers.IO) {
+        val file = File(dir, key(spot.latitude, spot.longitude, spot.name) + ".words")
+        if (file.exists()) return@withContext runCatching { file.readLines().filter { it.isNotBlank() }.toSet() }.getOrDefault(emptySet())
+        lock.withLock {
+            if (file.exists()) return@withLock file.readLines().filter { it.isNotBlank() }.toSet()
+            runCatching { fetchWords(spot) }.getOrNull()?.also { words -> runCatching { file.writeText(words.joinToString("\n")) } }.orEmpty()
+        }
+    }
+
+    private fun fetchWords(spot: PhotoSpot): Set<String> {
+        val coord = "%.3f|%.3f".format(Locale.US, spot.latitude, spot.longitude)
+        val titles = mutableListOf<String>()
+        spot.name?.let { name ->
+            val response = get(
+                "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&redirects=1" +
+                    "&titles=${encode(name)}&prop=coordinates&codistancefrompoint=${encode(coord)}",
+            )
+            val page = response.optJSONObject("query")?.optJSONArray("pages")?.optJSONObject(0)
+            val distance = page?.optJSONArray("coordinates")?.optJSONObject(0)?.optDouble("dist")
+            if (page != null && !page.has("missing") && distance != null && distance <= NAMED_RADIUS_M) titles += page.getString("title")
+        }
+        val nearby = get(
+            "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&generator=geosearch" +
+                "&ggscoord=${encode(coord)}&ggsradius=$PHOTO_RADIUS_M&ggslimit=20&prop=coordinates|info&codistancefrompoint=${encode(coord)}",
+        ).optJSONObject("query")?.optJSONArray("pages")
+        if (nearby != null) {
+            titles += (0 until nearby.length()).map { nearby.getJSONObject(it) }.sortedByDescending { page ->
+                val distance = page.optJSONArray("coordinates")?.optJSONObject(0)?.optDouble("dist", PHOTO_RADIUS_M.toDouble()) ?: PHOTO_RADIUS_M.toDouble()
+                page.optInt("length") / (1 + (distance / 100).let { it * it })
+            }.map { it.getString("title") }.filter { it !in titles }.take(4)
+        }
+        if (titles.isEmpty()) return emptySet()
+        val texts = mutableListOf<String>()
+        // The place's own article in full (or the most notable nearby), the others' introductions.
+        get(
+            "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&prop=extracts&explaintext=1" +
+                "&exlimit=1&titles=${encode(titles.first())}",
+        ).optJSONObject("query")?.optJSONArray("pages")?.optJSONObject(0)?.optString("extract")?.let(texts::add)
+        if (titles.size > 1) {
+            val intros = get(
+                "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&prop=extracts&explaintext=1" +
+                    "&exintro=1&exlimit=20&titles=${encode(titles.drop(1).joinToString("|"))}",
+            ).optJSONObject("query")?.optJSONArray("pages")
+            if (intros != null) for (i in 0 until intros.length()) intros.getJSONObject(i).optString("extract").let(texts::add)
+        }
+        return texts.flatMap { text -> WORD.findAll(text).map { it.value.lowercase() } }.distinct().take(MAX_PLACE_WORDS).toSet()
     }
 
     /** The saved photo, or null if there's none. A recent "nothing here" counts as saved. */

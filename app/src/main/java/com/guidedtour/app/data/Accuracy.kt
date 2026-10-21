@@ -29,6 +29,7 @@ object Accuracy {
         var basicTotal = 0.0
         var improvedTotal = 0.0
         var correctedTotal = 0.0
+        var foundTotal = 0.0
         val lists = WordLists.get(context)
         var languagesChecked = 0
         var languagesRight = 0
@@ -37,15 +38,19 @@ object Accuracy {
             val bitmap = decode(file) ?: continue
             val basic = characterErrorRate(truth, Recognizer.read(bitmap, script, enhance = false).text)
             val reading = Recognizer.read(bitmap, script, enhance = true)
-            val improved = characterErrorRate(truth, reading.text)
-            val spans = Recognizer.detectLanguages(reading.text)
-            val fixed = lists.correct(reading.text, spans, reading.unsure)
+            // As a scan would: the lines read again vote, then words are corrected.
+            val agreed = agreed(reading, emptyList(), lists)
+            val improved = characterErrorRate(truth, agreed)
+            val spans = Recognizer.detectLanguages(agreed)
+            val fixed = lists.correct(agreed, spans, reading.unsure)
             val corrected = characterErrorRate(truth, fixed)
             basicTotal += basic
             improvedTotal += improved
             correctedTotal += corrected
-            report.appendLine("%-24s basic %5.1f%%   improved %5.1f%%   corrected %5.1f%%".format(Locale.US, file.name.take(24), basic * 100, improved * 100, corrected * 100))
-            changedWords(reading.text, fixed).forEach { report.appendLine("    $it") }
+            val found = wordsFound(truth, fixed)
+            foundTotal += found
+            report.appendLine("%-24s basic %5.1f%%   improved %5.1f%%   corrected %5.1f%%   words found %5.1f%%".format(Locale.US, file.name.take(24), basic * 100, improved * 100, corrected * 100, found * 100))
+            changedWords(agreed, fixed).forEach { report.appendLine("    $it") }
             // What was read, when it went wrong, to see how.
             if (corrected > 0.02) report.appendLine("    read: " + fixed.replace(Regex("\\s+"), " ").take(1200))
             File(dir, file.nameWithoutExtension + ".lang").takeIf { it.exists() }?.let { expectedFile ->
@@ -59,6 +64,7 @@ object Accuracy {
         val n = images.size
         report.appendLine()
         report.appendLine("%d photos. Average character error: basic %.1f%%, improved %.1f%%, corrected %.1f%%".format(Locale.US, n, basicTotal / n * 100, improvedTotal / n * 100, correctedTotal / n * 100))
+        report.appendLine("Words found: %.1f%% (works with a .txt that's only an excerpt of the text)".format(Locale.US, foundTotal / n * 100))
         if (languagesChecked > 0) report.appendLine("Languages detected right: %d of %d".format(Locale.US, languagesRight, languagesChecked))
         report.toString().also { runCatching { File(dir, "report.txt").writeText(it) } }
     }
