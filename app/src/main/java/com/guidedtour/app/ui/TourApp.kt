@@ -100,7 +100,9 @@ fun TourApp(viewModel: TourViewModel) {
     val scanState by viewModel.state.collectAsStateWithLifecycle()
     val guidesBounce = remember { Animatable(1f) }
     val flight = remember { CaptureFlight() }
-    val showPlayer = player.active && selected == Tab.Guides
+    // In Guides the playing visit's header is the player; it floats only while that header is out of view.
+    var inlinePlayer by remember { mutableStateOf(false) }
+    val showPlayer = player.active && selected == Tab.Guides && !inlinePlayer
     var playerHeight by remember { mutableStateOf(0.dp) }
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -152,7 +154,13 @@ fun TourApp(viewModel: TourViewModel) {
                     Tab.Scan -> Unit
                     Tab.Places -> Surface(Modifier.fillMaxSize()) { MapScreen(viewModel) }
                     Tab.Guides -> Surface(Modifier.fillMaxSize()) {
-                        TextsScreen(viewModel, bottomInset = if (showPlayer) playerHeight else 0.dp, onOpenSettings = { showSettings = true })
+                        TextsScreen(
+                            viewModel,
+                            bottomInset = if (showPlayer) playerHeight else 0.dp,
+                            onOpenSettings = { showSettings = true },
+                            onOpenQueue = { showQueue = true },
+                            onInlinePlayer = { inlinePlayer = it },
+                        )
                     }
                 }
                 // The player floats over the Guides list only, which shows around it.

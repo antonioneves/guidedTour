@@ -210,9 +210,19 @@ private val thumbnailCache = object : LruCache<String, ImageBitmap>(24 * 1024 * 
     override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
 }
 
-/** Compact player shown above the navigation bar whenever something is queued or playing. */
+/**
+ * Compact player, floating above the navigation bar or, [inline], in the Guides list as the header of
+ * the visit being played; [title] replaces the text's place name there.
+ */
 @Composable
-fun NowPlayingBar(player: PlayerState, viewModel: TourViewModel, onOpenQueue: () -> Unit, modifier: Modifier = Modifier) {
+fun NowPlayingBar(
+    player: PlayerState,
+    viewModel: TourViewModel,
+    onOpenQueue: () -> Unit,
+    modifier: Modifier = Modifier,
+    inline: Boolean = false,
+    title: String? = null,
+) {
     val item = player.current ?: return
     // A floating, rounded player in the inverse colours, so it stands apart from the cards; with the
     // place's photo behind it, darkened so the text and buttons stay readable.
@@ -220,11 +230,11 @@ fun NowPlayingBar(player: PlayerState, viewModel: TourViewModel, onOpenQueue: ()
     val photo = rememberPlacePhoto(viewModel, item.spot)
     val content = if (photo != null) Color.White else colors.inverseOnSurface
     Surface(
-        modifier = modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
+        modifier = modifier.fillMaxWidth().then(if (inline) Modifier else Modifier.padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp)),
         shape = RoundedCornerShape(24.dp),
         color = colors.inverseSurface,
         contentColor = content,
-        shadowElevation = 6.dp,
+        shadowElevation = if (inline) 3.dp else 6.dp,
     ) {
         Box {
             if (photo != null) {
@@ -243,7 +253,13 @@ fun NowPlayingBar(player: PlayerState, viewModel: TourViewModel, onOpenQueue: ()
                 )
                 Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.Top) {
                     Column(Modifier.weight(1f).padding(top = 4.dp)) {
-                        Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            title ?: item.title,
+                            style = if (inline) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = if (inline) Modifier.semantics { heading() } else Modifier,
+                        )
                         val position = if (player.queue.size > 1) "${player.index + 1} of ${player.queue.size} · " else ""
                         Text(
                             position + item.text,
