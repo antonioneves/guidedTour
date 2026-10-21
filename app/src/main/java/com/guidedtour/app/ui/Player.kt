@@ -1,5 +1,6 @@
 package com.guidedtour.app.ui
 
+import androidx.compose.foundation.layout.heightIn
 import com.guidedtour.app.data.QueueItem
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.semantics.customActions
@@ -425,13 +426,15 @@ private fun QueueCard(
             colors = CardDefaults.elevatedCardColors(containerColor = if (current) colors.primaryContainer else colors.surfaceContainerLow),
             elevation = CardDefaults.elevatedCardElevation(defaultElevation = if (dragging) 8.dp else 1.dp),
             modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
+                // Swiping isn't available to screen readers, so removing is an action too.
                 customActions = listOfNotNull(
+                    CustomAccessibilityAction("Remove from queue") { currentRemove(); true },
                     onMoveEarlier?.let { CustomAccessibilityAction("Move earlier") { it(); true } },
                     onMoveLater?.let { CustomAccessibilityAction("Move later") { it(); true } },
                 )
             },
         ) {
-            Row(Modifier.padding(start = 12.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 12.dp, bottom = 12.dp).heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(56.dp).clip(MaterialTheme.shapes.medium).background(colors.secondaryContainer), contentAlignment = Alignment.Center) {
                     if (photo != null) Image(photo.image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     else Icon(Icons.Filled.Place, null, tint = colors.onSecondaryContainer)
@@ -457,7 +460,6 @@ private fun QueueCard(
                         tint = colors.onSurfaceVariant,
                     )
                 }
-                IconButton(onClick = onRemove) { Icon(Icons.Filled.Close, "Remove from queue") }
             }
         }
     }
