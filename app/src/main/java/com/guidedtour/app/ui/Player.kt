@@ -68,6 +68,14 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.ui.draw.alpha
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.ExposedDropdownMenu
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -545,37 +553,67 @@ private fun VoiceSection(viewModel: TourViewModel) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        else -> Column {
-            VoiceRow("Automatic (best installed voice)", null, chosen[selected] == null, onSelect = { viewModel.settings.setVoice(selected, null) },
-                onPlay = { viewModel.previewVoice(selected, null, sample) })
-            voices.forEachIndexed { index, voice ->
-                val region = voice.locale.displayCountry
-                val detail = listOfNotNull(
-                    if (voice.quality >= 400) "high quality" else null,
-                    if (voice.isNetworkConnectionRequired) "needs internet" else null,
-                ).joinToString(", ").ifEmpty { null }
-                VoiceRow(
-                    "Voice ${index + 1}" + if (region.isNotBlank()) " · $region" else "", detail, chosen[selected] == voice.name,
-                    onSelect = { viewModel.settings.setVoice(selected, voice.name) },
-                    onPlay = { viewModel.previewVoice(selected, voice.name, sample) },
-                )
-            }
+        else -> {
+            val options = listOf(VoiceOption(null, "Automatic", "Best installed voice")) +
+                voices.mapIndexed { index, voice ->
+                    val region = voice.locale.displayCountry
+                    VoiceOption(
+                        voice.name,
+                        "Voice ${index + 1}" + if (region.isNotBlank()) " · $region" else "",
+                        listOfNotNull(
+                            if (voice.quality >= 400) "High quality" else null,
+                            if (voice.isNetworkConnectionRequired) "Needs internet" else null,
+                        ).joinToString(", ").ifEmpty { null },
+                    )
+                }
+            VoiceDropdown(
+                options,
+                current = options.firstOrNull { it.name == chosen[selected] } ?: options.first(),
+                onSelect = { viewModel.settings.setVoice(selected, it.name) },
+                onPlay = { viewModel.previewVoice(selected, it.name, sample) },
+            )
         }
     }
 }
 
+/** A voice to choose from; [name] is null for the automatic choice. */
+private data class VoiceOption(val name: String?, val title: String, val detail: String?)
+
+/** The chosen voice in a drop-down; every option has its own play button for a spoken sample. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun VoiceRow(title: String, detail: String?, selected: Boolean, onSelect: () -> Unit, onPlay: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = null, modifier = Modifier.padding(end = 12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun VoiceDropdown(options: List<VoiceOption>, current: VoiceOption, onSelect: (VoiceOption) -> Unit, onPlay: (VoiceOption) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = current.title,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            supportingText = current.detail?.let { { Text(it) } },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(option.title, style = MaterialTheme.typography.bodyLarge)
+                            if (option.detail != null) {
+                                Text(option.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    },
+                    // Every row keeps the check mark's space, so the names line up.
+                    leadingIcon = { Icon(Icons.Filled.Check, null, Modifier.alpha(if (option == current) 1f else 0f)) },
+                    // Plays a sample without closing the menu, so voices can be compared before choosing.
+                    trailingIcon = { IconButton(onClick = { onPlay(option) }) { Icon(Icons.Filled.PlayArrow, "Play a sample of ${option.title}") } },
+                    onClick = { onSelect(option); expanded = false },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                )
+            }
         }
-        IconButton(onClick = onPlay) { Icon(Icons.Filled.PlayArrow, "Play a sample of $title") }
     }
 }
 
