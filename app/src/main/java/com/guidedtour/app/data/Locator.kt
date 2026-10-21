@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Geocoder
 import android.location.Location
+import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
@@ -15,13 +16,19 @@ import kotlin.coroutines.resume
 class Locator(private val context: Context) {
     private val client = LocationServices.getFusedLocationProviderClient(context)
 
-    /** Current location, or null if permission is missing or no fix is available. */
+    /** Current location (or one from the last minute), or null if permission is missing or no fix is available. */
     @SuppressLint("MissingPermission")
     suspend fun current(): Location? = try {
         suspendCancellableCoroutine { cont ->
             val cts = CancellationTokenSource()
             cont.invokeOnCancellation { cts.cancel() }
-            client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token)
+            // A fix from the last minute will do: waiting for a new one can take seconds indoors.
+            val request = CurrentLocationRequest.Builder()
+                .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
+                .setMaxUpdateAgeMillis(60_000)
+                .setDurationMillis(10_000)
+                .build()
+            client.getCurrentLocation(request, cts.token)
                 .addOnSuccessListener { cont.resume(it) }
                 .addOnFailureListener { cont.resume(null) }
         }

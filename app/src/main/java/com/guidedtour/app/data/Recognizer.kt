@@ -22,6 +22,8 @@ import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
@@ -75,6 +77,9 @@ object Recognizer {
     /** Lines this many pixels tall read reliably; smaller ones are enlarged towards it in the second pass. */
     private const val SHARP_LETTER = 32f
 
+    /** Lines this many pixels tall on the overview gain nothing from the full-resolution photo. */
+    private const val BIG_LETTER = 40
+
     /** Enlarging more than this only blurs. */
     private const val MAX_ZOOM = 3f
 
@@ -96,15 +101,23 @@ object Recognizer {
     private val clients = HashMap<OcrScript, TextRecognizer>()
     private val languageId by lazy { LanguageIdentification.getClient() }
 
+    private val spares = HashMap<OcrScript, TextRecognizer>()
+
+    /** A second recognizer for [script], to read two images at once (a recognizer reads one at a time). */
     @Synchronized
-    fun client(script: OcrScript): TextRecognizer = clients.getOrPut(if (script == OcrScript.Auto) OcrScript.Latin else script) {
-        when (script) {
-            OcrScript.Auto, OcrScript.Latin -> TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-            OcrScript.Chinese -> TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
-            OcrScript.Japanese -> TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
-            OcrScript.Korean -> TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
-            OcrScript.Devanagari -> TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build())
-        }
+    private fun spareClient(script: OcrScript): TextRecognizer = spares.getOrPut(if (script == OcrScript.Auto) OcrScript.Latin else script) {
+        newClient(script)
+    }
+
+    @Synchronized
+    fun client(script: OcrScript): TextRecognizer = clients.getOrPut(if (script == OcrScript.Auto) OcrScript.Latin else script) { newClient(script) }
+
+    private fun newClient(script: OcrScript): TextRecognizer = when (script) {
+        OcrScript.Auto, OcrScript.Latin -> TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        OcrScript.Chinese -> TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+        OcrScript.Japanese -> TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
+        OcrScript.Korean -> TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
+        OcrScript.Devanagari -> TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build())
     }
 
     /** Converts a camera photo to an upright bitmap (at most [FULL_SIDE] on its long side). Always closes [image]. */
@@ -187,7 +200,8 @@ object Recognizer {
         var first = firstPass(overview, script, filter)
         // Sideways text (the phone turned while the screen stayed upright, or a plaque mounted on its
         // side) reads poorly: if this one did, try a quarter turn each way and keep the best.
-        if (enhance && (looksSideways(first.blocks) || looksWeak(first.reading))) {
+        // (Text that's merely hard to read isn't tried turned: a turn only wins if it lays lines flat.)
+        if (enhance && (looksSideways(first.blocks) || first.reading.letters < 40)) {
             for (degrees in listOf(90, 270)) {
                 val turned = withContext(Dispatchers.Default) { rotated(overview, degrees.toFloat()) }
                 val pass = firstPass(turned, script, filter)
@@ -205,8 +219,9 @@ object Recognizer {
         var best = first.reading
         var alternatives = emptyList<String>()
         if (enhance && first.kept.isNotEmpty()) {
-            if (photo !== overview) {
-                // The text area again, from the full photo.
+            // The text area again, from the full photo, unless its letters are already plenty big.
+            val bigEnough = first.kept.flatMap { it.lines }.map { it.size }.sorted().let { it[it.size / 2] } >= BIG_LETTER
+            if (photo !== overview && !bigEnough) {
                 val scale = max(photo.width, photo.height).toFloat() / max(overview.width, overview.height)
                 // Around all the text seen, not just the main plaque's: the pass on the detail sorts that out again.
                 val detail = withContext(Dispatchers.Default) { textArea(photo, turn, first.blocks, scale) }
@@ -220,18 +235,24 @@ object Recognizer {
                     if (detail !== photo) detail.recycle()
                 }
             }
-            // Straighten or crop around the kept text only, so neighbouring plaques fall outside.
-            val improved = withContext(Dispatchers.Default) { enhanced(source, first.kept) }
-            val second = Pass(first.script, recognize(client(first.script), improved), improved.width, improved.height, filter)
+            // Two readings at once, on two recognizers: straightened or cropped around the kept text
+            // only (so neighbouring plaques fall outside), with contrast raised over it all; and the
+            // same with contrast raised tile by tile instead, right in other places: a vote.
+            val kept = first.kept
+            val script = first.script
+            val (improved, second, evened) = coroutineScope {
+                val evenedText = async {
+                    val image = withContext(Dispatchers.Default) { enhanced(source, kept, local = true) }
+                    Pass(script, recognize(spareClient(script), image), image.width, image.height, filter).reading.text
+                        .also { image.recycle() }.takeIf { it.isNotBlank() }
+                }
+                val image = withContext(Dispatchers.Default) { enhanced(source, kept) }
+                Triple(image, Pass(script, recognize(client(script), image), image.width, image.height, filter), evenedText.await())
+            }
             val (bestPass, bestImage) = if (isBetter(second.reading, best)) second to improved else first to source
             best = bestPass.reading
-            // The lines it wasn't sure of, again, each on its own and enlarged: a second opinion to vote with.
+            // The lines it wasn't sure of, again, each on its own and enlarged: another vote.
             val reread = rereadUnsure(bestPass, bestImage)
-            // The same with contrast raised tile by tile instead: right in other places, so a third vote.
-            val evenedImage = withContext(Dispatchers.Default) { enhanced(source, first.kept, local = true) }
-            val evened = Pass(first.script, recognize(client(first.script), evenedImage), evenedImage.width, evenedImage.height, filter)
-                .reading.text.takeIf { it.isNotBlank() }
-            evenedImage.recycle()
             alternatives = listOfNotNull(reread, evened)
             improved.recycle()
         }
@@ -253,12 +274,20 @@ object Recognizer {
             .sortedBy { it.confidence }.take(MAX_REREADS)
         if (unsure.isEmpty()) return null
         val replaced = java.util.IdentityHashMap<OcrLine, OcrLine>()
-        for (line in unsure) {
-            val crop = withContext(Dispatchers.Default) { lineImage(image, line) } ?: continue
-            val found = recognize(client(pass.script), crop).flatMap { it.lines }
+        // Each line on its own (read together in one image, they read worse), two at a time on the two recognizers.
+        val crops = withContext(Dispatchers.Default) { unsure.mapNotNull { line -> lineImage(image, line)?.let { line to it } } }
+        if (crops.isEmpty()) return null
+        val readings = coroutineScope {
+            crops.mapIndexed { i, (_, crop) ->
+                async { recognize(if (i % 2 == 0) client(pass.script) else spareClient(pass.script), crop).flatMap { it.lines } }
+            }.map { it.await() }
+        }
+        for ((index, pair) in crops.withIndex()) {
+            val (line, crop) = pair
+            val found = readings[index]
             val middle = crop.height / 2
             crop.recycle()
-            // The line itself, not a neighbour's edge caught in the margin.
+            // The line itself, not a neighbour's edge caught in its crop's margin.
             val read = found.filter { middle in it.top..it.bottom }.sortedBy { it.left }
             if (read.isEmpty()) continue
             val text = read.joinToString(" ") { it.text }
@@ -328,9 +357,6 @@ object Recognizer {
         val lines = blocks.flatMap { it.lines }.filter { it.text.trim().length >= 3 }
         return lines.isNotEmpty() && lines.count { it.height > 1.5 * (it.right - it.left) } * 2 > lines.size
     }
-
-    /** Few letters or low confidence: worth trying the photo turned sideways. */
-    private fun looksWeak(reading: Reading) = reading.letters < 40 || reading.confidence < 0.7f
 
     private fun isBetter(candidate: Reading, current: Reading): Boolean =
         (candidate.letters >= current.letters * 0.9 && candidate.confidence >= current.confidence) ||
@@ -481,21 +507,33 @@ object Recognizer {
             low[ty * TILES + tx] = mid - span / 2f
             high[ty * TILES + tx] = mid + span / 2f
         }
+        // Where each column falls between tile centres, worked out once rather than for every pixel.
+        val cx0 = IntArray(w)
+        val cdx = FloatArray(w)
+        for (x in 0 until w) {
+            val fx = ((x + 0.5f) / tw - 0.5f).coerceIn(0f, TILES - 1f)
+            cx0[x] = fx.toInt().coerceIn(0, TILES - 2)
+            cdx[x] = fx - cx0[x]
+        }
+        val rowLow = FloatArray(TILES)
+        val rowHigh = FloatArray(TILES)
         for (y in 0 until h) {
             val fy = ((y + 0.5f) / th - 0.5f).coerceIn(0f, TILES - 1f)
-            val y0 = fy.toInt().coerceAtMost(TILES - 2).coerceAtLeast(0)
+            val y0 = fy.toInt().coerceIn(0, TILES - 2)
             val dy = fy - y0
+            // This row's dark and light at each tile column, blended between the tile rows above and below.
+            for (t in 0 until TILES) {
+                rowLow[t] = low[y0 * TILES + t] * (1 - dy) + low[(y0 + 1) * TILES + t] * dy
+                rowHigh[t] = high[y0 * TILES + t] * (1 - dy) + high[(y0 + 1) * TILES + t] * dy
+            }
+            val row = y * w
             for (x in 0 until w) {
-                val fx = ((x + 0.5f) / tw - 0.5f).coerceIn(0f, TILES - 1f)
-                val x0 = fx.toInt().coerceAtMost(TILES - 2).coerceAtLeast(0)
-                val dx = fx - x0
-                fun at(a: FloatArray, tx: Int, ty: Int) = a[ty * TILES + tx]
-                fun blend(a: FloatArray) = (at(a, x0, y0) * (1 - dx) + at(a, x0 + 1, y0) * dx) * (1 - dy) +
-                    (at(a, x0, y0 + 1) * (1 - dx) + at(a, x0 + 1, y0 + 1) * dx) * dy
-                val lo = blend(low)
-                val hi = blend(high)
-                val v = ((luma[y * w + x] - lo) * 255f / max(1f, hi - lo)).toInt().coerceIn(0, 255)
-                pixels[y * w + x] = (0xff shl 24) or (v shl 16) or (v shl 8) or v
+                val x0 = cx0[x]
+                val dx = cdx[x]
+                val lo = rowLow[x0] * (1 - dx) + rowLow[x0 + 1] * dx
+                val hi = rowHigh[x0] * (1 - dx) + rowHigh[x0 + 1] * dx
+                val v = ((luma[row + x] - lo) * 255f / max(1f, hi - lo)).toInt().coerceIn(0, 255)
+                pixels[row + x] = (0xff shl 24) or (v shl 16) or (v shl 8) or v
             }
         }
         return createBitmap(w, h).also { it.setPixels(pixels, 0, w, 0, 0, w, h) }
@@ -549,3 +587,4 @@ object Recognizer {
     /** The language of [text], or null if unsure; see [pickLanguage]. */
     suspend fun detectLanguage(text: String, country: String? = null): String? = pickLanguage(possibleLanguages(text), country)
 }
+

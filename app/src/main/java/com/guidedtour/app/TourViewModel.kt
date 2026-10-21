@@ -33,7 +33,9 @@ import com.guidedtour.app.data.Translator
 import com.guidedtour.app.ui.placeLabel
 import com.guidedtour.app.data.mainLanguage
 import com.guidedtour.app.data.encodeSpans
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
@@ -127,6 +129,28 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     // Careful capture takes several photos; we keep only the sharpest to save memory.
     private var bestFrame: Bitmap? = null
     private var bestSharpness = -1.0
+    /** Where a scan is: position, place name and country, and the place's words (see [PlacePhotos.words]). */
+    private class Whereabouts(val position: Pair<Double, Double>?, val spot: Locator.Spot?, val words: Set<String>)
+
+    /** Where the phone is, looked up from the shutter press on, while the photo is read. */
+    private var whereabouts: Deferred<Whereabouts>? = null
+
+    /** Finds where the phone is now (a fix up to a minute old will do), its place's name and words. */
+    private fun lookUpWhereabouts(): Deferred<Whereabouts> = viewModelScope.async {
+        val position = locator.current()?.let { it.latitude to it.longitude }
+        whereaboutsAt(position)
+    }
+
+    private suspend fun whereaboutsAt(position: Pair<Double, Double>?): Whereabouts {
+        val spot = position?.let { locator.spot(it.first, it.second) }
+        // The place's own words (from Wikipedia, if place photos are allowed to ask it), so names on its
+        // plaques are recognised and mended.
+        val words = position?.takeIf { settings.correctWords.value && settings.placePhotos.value }?.let { (lat, lng) ->
+            withTimeoutOrNull(PLACE_WORDS_WAIT_MS) { placePhotos.words(PhotoSpot(lat, lng, spot?.name)) }
+        }.orEmpty()
+        return Whereabouts(position, spot, words)
+    }
+
     /** The burst's other photos, smaller, to vote on the sharpest one's words. */
     private val otherFrames = mutableListOf<Bitmap>()
 
@@ -134,6 +158,8 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     fun beginCapture(): Boolean {
         if (_state.value == ScanState.Processing) return false
         _state.value = ScanState.Processing
+        whereabouts?.cancel()
+        whereabouts = lookUpWhereabouts()
         bestFrame?.recycle()
         bestFrame = null
         bestSharpness = -1.0
@@ -249,18 +275,24 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     ) {
         android.util.Log.i("GuidedTour", "capture: read ${read.length} characters")
         if (read.isBlank()) {
+            whereabouts?.cancel()
+            whereabouts = null
             _state.value = ScanState.NoText
             return
         }
-        val location = position ?: if (here) locator.current()?.let { it.latitude to it.longitude } else null
-        val spot = location?.let { locator.spot(it.first, it.second) }
+        // Looked up since the shutter press, if it's to be where the phone is; else where the photo says.
+        val found = whereabouts.also { whereabouts = null }
+        val where = when {
+            position != null -> { found?.cancel(); whereaboutsAt(position) }
+            here -> (found ?: lookUpWhereabouts()).await()
+            else -> { found?.cancel(); Whereabouts(null, null, emptySet()) }
+        }
+        val location = where.position
+        val spot = where.spot
         var spans = Recognizer.detectLanguages(read, spot?.countryCode)
         val text = if (settings.correctWords.value) {
-            // The place's own words (from Wikipedia, if place photos are allowed to ask it) and the
-            // user's, so names on its plaques are recognised and mended.
-            val placeWords = location?.takeIf { settings.placePhotos.value }?.let { (lat, lng) ->
-                withTimeoutOrNull(PLACE_WORDS_WAIT_MS) { placePhotos.words(PhotoSpot(lat, lng, spot?.name)) }
-            }.orEmpty()
+            // The place's own words and the user's, so names on its plaques are recognised and mended.
+            val placeWords = where.words
             // On-device AI proofreading first, where the phone has it, then the word lists.
             val list = mainLanguage(read, spans)?.let(wordLists::of)
             val proofread = if (!settings.aiProofreading.value) read else {
