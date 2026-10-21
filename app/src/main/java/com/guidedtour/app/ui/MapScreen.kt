@@ -7,11 +7,8 @@ import android.graphics.Paint
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.compose.foundation.background
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ListItem
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.clickable
@@ -440,27 +437,12 @@ private fun isOnline(context: Context): Boolean {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MapCredits(onDismiss: () -> Unit) {
-    val uri = LocalUriHandler.current
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(bottom = 16.dp)) {
             Text("Map data", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
-            CREDITS.forEach { (title, detail, link) ->
-                ListItem(
-                    headlineContent = { Text(title) },
-                    supportingContent = { Text(detail) },
-                    trailingContent = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, "Open website") },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    modifier = Modifier.clickable { uri.openUri(link) }.padding(horizontal = 8.dp),
-                )
-            }
+            (MAP_CREDITS + IMPROVE_MAP).forEach { CreditRow(it) }
         }
     }
 }
 
-private val CREDITS = listOf(
-    Triple("© OpenStreetMap contributors", "Map data, under the Open Database License", "https://www.openstreetmap.org/copyright"),
-    Triple("© OpenMapTiles", "Map design", "https://openmaptiles.org/"),
-    Triple("OpenFreeMap", "Free map tiles", "https://openfreemap.org/"),
-    Triple("MapLibre", "Map engine", "https://maplibre.org/"),
-    Triple("Improve this map", "Report a mistake to OpenStreetMap", "https://www.openstreetmap.org/fix-the-map"),
-)
+private val IMPROVE_MAP = Credit("Improve this map", "Report a mistake to OpenStreetMap", "https://www.openstreetmap.org/fix-the-map")

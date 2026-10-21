@@ -68,6 +68,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.ui.draw.alpha
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.OutlinedTextField
@@ -346,6 +347,8 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
     val careful by settings.carefulCapture.collectAsStateWithLifecycle()
     val report by viewModel.accuracyReport.collectAsStateWithLifecycle()
     val script by settings.script.collectAsStateWithLifecycle()
+    var showCredits by remember { mutableStateOf(false) }
+    if (showCredits) CreditsSheet(onDismiss = { showCredits = false })
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -396,6 +399,22 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
                 "Takes three photos and reads the sharpest. Slightly slower, usually more accurate.",
                 careful, settings::setCarefulCapture,
             )
+
+            Row(
+                Modifier.fillMaxWidth().clickable { showCredits = true }.padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Credits", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Maps, text recognition, translation, voices and the open-source code the app is built on.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
 
             // Developer tools only appear in debug builds.
             if (BuildConfig.DEBUG) {
