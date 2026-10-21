@@ -1,5 +1,7 @@
 package com.guidedtour.app.ui
 
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.heightIn
 import com.guidedtour.app.data.QueueItem
 import androidx.compose.ui.zIndex
@@ -422,10 +424,17 @@ private fun QueueCard(
         },
     ) {
         val photo = rememberPlacePhoto(viewModel, item.spot)
-        ElevatedCard(
-            colors = CardDefaults.elevatedCardColors(containerColor = if (current) colors.primaryContainer else colors.surfaceContainerLow),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = if (dragging) 8.dp else 1.dp),
-            modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
+        TextCard(
+            status = status,
+            title = (if (item.translated) "Translation · " else "") + item.title,
+            text = item.text,
+            current = current,
+            raised = dragging,
+            image = {
+                if (photo != null) Image(photo.image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                else Icon(Icons.Filled.Place, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+            },
+            modifier = Modifier.semantics {
                 // Swiping isn't available to screen readers, so removing is an action too.
                 customActions = listOfNotNull(
                     CustomAccessibilityAction("Remove from queue") { currentRemove(); true },
@@ -434,33 +443,58 @@ private fun QueueCard(
                 )
             },
         ) {
-            Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 12.dp, bottom = 12.dp).heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(56.dp).clip(MaterialTheme.shapes.medium).background(colors.secondaryContainer), contentAlignment = Alignment.Center) {
-                    if (photo != null) Image(photo.image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    else Icon(Icons.Filled.Place, null, tint = colors.onSecondaryContainer)
-                }
-                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                    Text(status, style = MaterialTheme.typography.labelMedium, color = if (current) colors.onPrimaryContainer else colors.primary)
-                    Text(
-                        (if (item.translated) "Translation · " else "") + item.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        item.text,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (onMoveEarlier != null || onMoveLater != null) {
-                    Icon(
-                        Icons.Filled.DragHandle, "Drag to reorder",
-                        handleModifier.size(48.dp).padding(12.dp),
-                        tint = colors.onSurfaceVariant,
-                    )
-                }
+            if (onMoveEarlier != null || onMoveLater != null) {
+                Icon(
+                    Icons.Filled.DragHandle, "Drag to reorder",
+                    handleModifier.size(48.dp).padding(12.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
+        }
+    }
+}
+
+/**
+ * A text as a card, as in the reading queue and a map place's list: a square [image], a [status]
+ * line, an optional [title], two or three lines of [text], and [trailing] buttons. [current] (the
+ * text being read) is highlighted; [raised] lifts it while it's dragged.
+ */
+@Composable
+fun TextCard(
+    status: String,
+    title: String?,
+    text: String,
+    current: Boolean,
+    image: @Composable BoxScope.() -> Unit,
+    modifier: Modifier = Modifier,
+    raised: Boolean = false,
+    onClick: (() -> Unit)? = null,
+    onClickLabel: String? = null,
+    trailing: @Composable RowScope.() -> Unit = {},
+) {
+    val colors = MaterialTheme.colorScheme
+    ElevatedCard(
+        colors = CardDefaults.elevatedCardColors(containerColor = if (current) colors.primaryContainer else colors.surfaceContainerLow),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = if (raised) 8.dp else 1.dp),
+        modifier = modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+    ) {
+        Row(
+            Modifier.then(if (onClick != null) Modifier.clickable(onClickLabel = onClickLabel, onClick = onClick) else Modifier)
+                .padding(start = 12.dp, end = 4.dp, top = 12.dp, bottom = 12.dp).heightIn(min = 56.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(56.dp).clip(MaterialTheme.shapes.medium).background(colors.secondaryContainer), contentAlignment = Alignment.Center, content = image)
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(status, style = MaterialTheme.typography.labelMedium, color = if (current) colors.onPrimaryContainer else colors.primary)
+                if (title != null) Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = if (title == null) 3 else 2, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            trailing()
         }
     }
 }

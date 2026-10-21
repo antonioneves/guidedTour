@@ -1,5 +1,11 @@
 package com.guidedtour.app.ui
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -125,6 +131,8 @@ fun MapScreen(viewModel: TourViewModel) {
     // The place whose pin was tapped (by its first scan's id): its row is scrolled to and highlighted.
     var selected by remember { mutableStateOf<Long?>(null) }
     var showCredits by remember { mutableStateOf(false) }
+    // A tapped pin holding several texts (by its first scan's id): they're listed in a sheet.
+    var stack by remember { mutableStateOf<Long?>(null) }
     val listState = rememberLazyListState()
     val dark = isSystemInDarkTheme()
     val routeColor = MaterialTheme.colorScheme.primary.toArgb()
@@ -262,8 +270,10 @@ fun MapScreen(viewModel: TourViewModel) {
                     m.addOnMapClickListener { point ->
                         val screen = m.projection.toScreenLocation(point)
                         val index = m.queryRenderedFeatures(screen, PINS).firstOrNull()?.getNumberProperty(PLACE_INDEX)?.toInt()
-                        val key = index?.let { currentPlaces.getOrNull(it) }?.scans?.first()?.id
+                        val place = index?.let { currentPlaces.getOrNull(it) }
+                        val key = place?.scans?.first()?.id
                         selected = key
+                        if (place != null && place.scans.size > 1) stack = key
                         // Bring the tapped place's row into view in the list below.
                         val row = currentListed.indexOfFirst { it.scans.first().id == key }
                         if (row >= 0) scope.launch { listState.animateScrollToItem(row) }
@@ -287,6 +297,9 @@ fun MapScreen(viewModel: TourViewModel) {
                 }
             }
             if (showCredits) MapCredits(onDismiss = { showCredits = false })
+            places.firstOrNull { it.scans.first().id == stack }?.let { place ->
+                PlaceSheet(place, player, viewModel, onDismiss = { stack = null })
+            }
             Column(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(16.dp)) {
                 if (!online) {
                     Surface(
@@ -459,3 +472,77 @@ private fun MapCredits(onDismiss: () -> Unit) {
 }
 
 private val IMPROVE_MAP = Credit("Improve this map", "Report a mistake to OpenStreetMap", "https://www.openstreetmap.org/fix-the-map")
+
+/** Every text of a pin that holds several, as cards under the place's photo; tap one to hear it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlaceSheet(place: Place, player: PlayerState, viewModel: TourViewModel, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        val photo = rememberPlacePhoto(viewModel, place.photoSpot())
+        val name = place.scans.first().placeLabel()
+        val count = "${place.scans.size} texts"
+        LazyColumn(
+            Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item(key = "header") {
+                val playAll = @Composable {
+                    FilledTonalButton(onClick = { viewModel.playAll(place.scans) }) {
+                        Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text("Play all")
+                    }
+                }
+                if (photo != null) {
+                    PlacePhotoBanner(photo, Modifier.padding(bottom = 4.dp)) {
+                        Row(
+                            Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(name, style = MaterialTheme.typography.titleLarge, color = Color.White, modifier = Modifier.semantics { heading() })
+                                Text(count, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.85f))
+                            }
+                            playAll()
+                        }
+                    }
+                } else {
+                    Row(Modifier.fillMaxWidth().padding(start = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+                            Text(count, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        playAll()
+                    }
+                }
+            }
+            // Oldest first, the order they were walked and "Play all" reads them.
+            items(place.scans, key = { it.id }) { scan ->
+                val current = player.current?.id == scan.id
+                val playing = current && player.playing
+                val play = { if (current) viewModel.togglePlayback() else viewModel.playNow(scan) }
+                TextCard(
+                    status = when {
+                        playing -> "Now playing"
+                        current -> "Paused"
+                        else -> scan.timeLabel()
+                    },
+                    title = null,
+                    text = scan.text,
+                    current = current,
+                    image = {
+                        if (scan.thumbnail != null) Thumbnail(scan.thumbnail, Modifier.fillMaxSize())
+                        else Icon(Icons.Filled.Place, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                    },
+                    onClick = play,
+                    onClickLabel = if (playing) "Pause" else "Read aloud",
+                ) {
+                    FilledTonalIconButton(onClick = play) {
+                        Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Read aloud")
+                    }
+                }
+            }
+        }
+    }
+}
