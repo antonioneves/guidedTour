@@ -125,6 +125,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.get
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -143,6 +144,10 @@ import kotlin.math.abs
 import kotlin.math.sqrt
 import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.Text
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -243,6 +248,24 @@ private class ThrottledAnalyzer(
         onStats(if (count == 0) 255 else (sum / count).toInt(), if (count == 0) 0f else glaring.toFloat() / count)
         delegate.analyze(image)
     }
+}
+
+/** How often the preview is read in night mode (see [CameraContent]): enough to follow the text. */
+private const val NIGHT_PREVIEW_MS = 350L
+
+/** Average brightness and share of glaring pixels of a preview snapshot, as the frame analysis measures them. */
+private fun previewStats(bitmap: android.graphics.Bitmap): Pair<Int, Float> {
+    var sum = 0L
+    var count = 0
+    var glaring = 0
+    for (y in 0 until bitmap.height step 16) for (x in 0 until bitmap.width step 16) {
+        val p = bitmap[x, y]
+        val luma = (((p shr 16) and 0xff) * 77 + ((p shr 8) and 0xff) * 150 + (p and 0xff) * 29) shr 8
+        sum += luma
+        if (luma >= 250) glaring++
+        count++
+    }
+    return (if (count == 0) 255 else (sum / count).toInt()) to (if (count == 0) 0f else glaring.toFloat() / count)
 }
 
 private val GoodGreen = Color(0xFF2E7D32)
@@ -372,7 +395,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
     var night by rememberSaveable { mutableStateOf(false) }
     val lens = choices?.let { c -> c.lenses.firstOrNull { key(it) == lensKey } ?: c.main }
     val nightOn = night && lens?.night == true
-    // Without live detection in night mode there are no tips or automatic capture, only the shutter.
+    // Night mode where the phone can't analyse frames alongside it: the preview is read instead.
     val liveOff = nightOn && lens?.nightLive != true
     var zoom by remember { mutableFloatStateOf(1f) }
     DisposableEffect(controller, lifecycleOwner) {
@@ -410,7 +433,61 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             viewModel.importPhoto(uri)
         }
     }
+    // What live detection saw, in the preview's coordinates: from camera frames, or in night mode
+    // (which can't analyse frames alongside) from snapshots of the preview.
+    fun showText(text: Text?, brightness: Int, glare: Float) {
+        frame = if (text == null) {
+            frames = tracker.update(emptyList()).map(::ShownFrame)
+            liveReadings.clear()
+            LiveFrame("", emptyList(), brightness, glare)
+        } else {
+            // The text as frames (columns, headings, notes aside); only the included ones count for
+            // tips, focus and capture, as only they will be read.
+            val blocks = text.textBlocks.mapNotNull { block ->
+                val lines = block.lines.mapNotNull { line ->
+                    line.boundingBox?.let {
+                        OcrLine(
+                            line.text, it.left, it.top, it.right, it.bottom, line.confidence,
+                            words = line.elements.map { e -> e.text to e.confidence },
+                            wordBoxes = line.elements.map { e -> (e.boundingBox?.left ?: it.left) to (e.boundingBox?.right ?: it.right) },
+                        )
+                    }
+                }
+                if (lines.isEmpty()) null else OcrBlock(lines)
+            }
+            val tracked = tracker.update(textFrames(blocks, viewSize.width, viewSize.height))
+            frames = tracked.map(::ShownFrame)
+            val included = tracked.filter { it.shown && it.included }
+            val main = orderBlocks(included.flatMap { it.frame.blocks })
+            val lines = main.flatMap { it.lines }.map { LineBox(it.left, it.top, it.right, it.bottom, it.confidence) }
+            val read = main.joinToString("\n\n") { it.text }
+            if (read.isNotBlank() && read != liveReadings.lastOrNull()) {
+                liveReadings.addLast(read)
+                if (liveReadings.size > LIVE_READINGS) liveReadings.removeFirst()
+            }
+            LiveFrame(read, lines, brightness, glare)
+        }
+    }
+
     // Live analysis only runs while this tab is showing, so it can't capture from behind another tab.
+    // Night mode without frame analysis: read snapshots of the preview instead, a few times a second.
+    LaunchedEffect(liveOff, visible, script) {
+        if (!liveOff || !visible) return@LaunchedEffect
+        val recognizer = Recognizer.client(script)
+        while (true) {
+            delay(NIGHT_PREVIEW_MS)
+            if (state == ScanState.Processing) continue
+            val snapshot = previewView?.bitmap ?: continue
+            val (brightness, glare) = withContext(Dispatchers.Default) { previewStats(snapshot) }
+            val text = suspendCancellableCoroutine<Text?> { cont ->
+                recognizer.process(InputImage.fromBitmap(snapshot, 0))
+                    .addOnSuccessListener { cont.resume(it) {} }
+                    .addOnFailureListener { cont.resume(null) {} }
+            }
+            snapshot.recycle()
+            showText(text, brightness, glare)
+        }
+    }
     DisposableEffect(controller, visible, script) {
         if (!visible) {
             frame = EMPTY_FRAME
@@ -423,40 +500,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             listOf(recognizer),
             ImageAnalysis.COORDINATE_SYSTEM_VIEW_REFERENCED,
             ContextCompat.getMainExecutor(context),
-        ) { result ->
-            val text = result.getValue(recognizer)
-            frame = if (text == null) {
-                frames = tracker.update(emptyList()).map(::ShownFrame)
-                liveReadings.clear()
-                LiveFrame("", emptyList(), brightness, glare)
-            } else {
-                // The text as frames (columns, headings, notes aside); only the included ones count for
-                // tips, focus and capture, as only they will be read.
-                val blocks = text.textBlocks.mapNotNull { block ->
-                    val lines = block.lines.mapNotNull { line ->
-                        line.boundingBox?.let {
-                            OcrLine(
-                                line.text, it.left, it.top, it.right, it.bottom, line.confidence,
-                                words = line.elements.map { e -> e.text to e.confidence },
-                                wordBoxes = line.elements.map { e -> (e.boundingBox?.left ?: it.left) to (e.boundingBox?.right ?: it.right) },
-                            )
-                        }
-                    }
-                    if (lines.isEmpty()) null else OcrBlock(lines)
-                }
-                val tracked = tracker.update(textFrames(blocks, viewSize.width, viewSize.height))
-                frames = tracked.map(::ShownFrame)
-                val included = tracked.filter { it.shown && it.included }
-                val main = orderBlocks(included.flatMap { it.frame.blocks })
-                val lines = main.flatMap { it.lines }.map { LineBox(it.left, it.top, it.right, it.bottom, it.confidence) }
-                val read = main.joinToString("\n\n") { it.text }
-                if (read.isNotBlank() && read != liveReadings.lastOrNull()) {
-                    liveReadings.addLast(read)
-                    if (liveReadings.size > LIVE_READINGS) liveReadings.removeFirst()
-                }
-                LiveFrame(read, lines, brightness, glare)
-            }
-        }
+        ) { result -> showText(result.getValue(recognizer), brightness, glare) }
         controller.setImageAnalysisAnalyzer(analysisExecutor, ThrottledAnalyzer(mlKit, analysisInterval) { b, g -> brightness = b; glare = g })
         onDispose { controller.clearImageAnalysisAnalyzer() }
     }
@@ -704,8 +748,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                         snackbar.showSnackbar(
                             when {
                                 !night -> "Night mode off"
-                                lens?.nightLive == true -> "Night mode on: brighter, slower photos"
-                                else -> "Night mode on: brighter, slower photos. Tips and auto capture pause."
+                                else -> "Night mode on: brighter, slower photos"
                             }
                         )
                     }
