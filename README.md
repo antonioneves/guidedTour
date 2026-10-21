@@ -135,3 +135,14 @@ transcripts give far more useful numbers than the synthetic set.
 Kotlin, Jetpack Compose with Material 3 Expressive, CameraX, ML Kit (text recognition, language
 identification, translation), Android TextToSpeech, Room, MapLibre with OpenStreetMap tiles from
 OpenFreeMap, and AndroidX Media.
+
+## License
+
+Copyright (C) 2026 Antonio Neves
+
+Guided Tour is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version. See [LICENSE](LICENSE) for the full text.
+
+The libraries and services it uses keep their own licenses; they are listed in the app under
+Settings → Credits.
