@@ -146,12 +146,16 @@ private fun groupScore(group: List<OcrBlock>, width: Int, height: Int): Double {
     return chars * (1 - 0.6 * min(1.0, distance)) * (if (cutOff) 0.5 else 1.0)
 }
 
-/** Drops small captions, credits and page numbers when there is clearly bigger main text. */
+/**
+ * Drops small captions, credits and page numbers when there is clearly bigger main text. The main
+ * text is where most of the letters are, not the biggest: a plaque's large title doesn't make its
+ * one-line instructions captions.
+ */
 fun dropNoise(blocks: List<OcrBlock>): List<OcrBlock> {
     if (blocks.size < 2) return blocks
-    val biggest = blocks.maxOf { it.medianLineHeight }
+    val main = mainTextSize(blocks)
     val kept = blocks.filter { b ->
-        val tiny = b.medianLineHeight < 0.5 * biggest && b.text.length < 80
+        val tiny = b.medianLineHeight < 0.6 * main && b.text.length < 80
         val pageNumber = b.text.trim().matches(Regex("""\d{1,4}"""))
         !tiny && !pageNumber
     }
@@ -165,6 +169,14 @@ fun fixConfusables(text: String): String {
     return text
         .replace(Regex("""(?<=\p{Ll})0(?=\p{Ll})"""), "o")
         .replace(Regex("""(?<=\p{Ll})[1|](?=\p{Ll})"""), "l")
+}
+
+/** The letter size most of the text is written in: the median line size, counting each block by its letters. */
+private fun mainTextSize(blocks: List<OcrBlock>): Int {
+    val bySize = blocks.sortedBy { it.medianLineHeight }
+    val half = bySize.sumOf { it.text.length } / 2.0
+    var count = 0
+    return bySize.first { count += it.text.length; count >= half }.medianLineHeight
 }
 
 /**

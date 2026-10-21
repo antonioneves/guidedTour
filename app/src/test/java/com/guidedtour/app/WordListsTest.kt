@@ -33,6 +33,16 @@ class WordListsTest {
         assertEquals("modern marble", fix("rnodern marb1e", setOf("rnodern")))
     }
 
+    @Test fun onlyMakesSlipsOcrMakes() {
+        // A lost thin letter, not the commoner word one letter away.
+        assertEquals("was built", fix("was buit", setOf("buit")))
+        // Look-alike "o" for "a".
+        assertEquals("near the machine", fix("neor the machine", setOf("neor")))
+        assertEquals("in a controlled manner", fix("in a controlled monner", setOf("monner")))
+        // Two slips away ("allow"): left as read rather than made "flow".
+        assertEquals("do not oflow people", fix("do not oflow people", setOf("oflow")))
+    }
+
     @Test fun keepsCaseOfTheMisreadWord() {
         assertEquals("THE TEMPLE", fix("THE TCMPLE", setOf("tcmple")))
         assertEquals("Temple of Zeus", fix("Tcmple of Zeus", setOf("tcmple")))
@@ -47,6 +57,14 @@ class WordListsTest {
         assertEquals("built by Iktinos and Kallikrates", fix("built by Iktinos and Kallikrates", setOf("iktinos", "kallikrates")))
         // Read the same way twice: probably right.
         assertEquals("the tholos and a tholos", fix("the tholos and a tholos", setOf("tholos")))
+    }
+
+    @Test fun leavesGarbledParagraphsAlone() {
+        // What OCR made of tiny print: mending single words here only invents new mistakes.
+        val garbled = "you to perto an uprighnnes 2 St do ent ar the sligh Bhe handie to the elbows clo wer body"
+        assertEquals(garbled, fix(garbled, setOf("perto", "uprighnnes", "sligh", "handie", "wer")))
+        // The next paragraph, read well, is still mended.
+        assertEquals("$garbled\n\nThe temple was built.", fix("$garbled\n\nThe tcmple was built.", setOf("perto", "tcmple")))
     }
 
     @Test fun eachParagraphUsesItsLanguage() {

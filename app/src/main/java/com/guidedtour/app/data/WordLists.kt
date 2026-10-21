@@ -89,8 +89,8 @@ fun listName(tag: String): String? = when (val language = tag.substringBefore('-
 /** How sure ML Kit must be of a word to trust it even when it isn't on the language's list. */
 const val SURE_CONFIDENCE = 0.8f
 
-/** Only words at least this common replace a misread one (one in ten million words). */
-private const val MIN_SCORE = 12
+/** Only words at least this common replace a misread one (one in a million words): rarer ones are likelier a wrong guess ("pper" isn't "piper"). */
+private const val MIN_SCORE = 18
 
 /**
  * A word on the list loses its accents to a far more common accented form: OCR often drops an accent,
@@ -98,13 +98,19 @@ private const val MIN_SCORE = 12
  */
 private const val ACCENT_GAIN = 6
 
-/** An edit that isn't a typical OCR slip costs this much commonness (two orders of magnitude). */
-private const val EDIT_COST = 12
+/** A missing thin letter costs this much commonness (one order of magnitude): it's a likely slip, but less than a look-alike. */
+private const val THIN_COST = 6
+
+/** Thin letters, which OCR is likeliest to lose altogether. */
+private const val THIN = "iltfjr"
+
+/** Two fixes this close in score are a guess: the word is left as read. */
+private const val AMBIGUOUS = 3
 
 private val TOKEN = Regex("""[\p{L}\p{M}0-9|]+""")
 
 /** Characters OCR mistakes for each other; swapping them is nearly free. */
-private val LOOKALIKES = listOf("0o", "1l", "1i", "|l", "|i", "li", "5s", "8b", "2z", "ce", "eo", "co", "uv", "ft", "hb", "rn")
+private val LOOKALIKES = listOf("0o", "1l", "1i", "|l", "|i", "li", "5s", "8b", "2z", "ce", "eo", "co", "oa", "ea", "uv", "vw", "ft", "hb", "rn")
     .flatMap { listOf(it[0] to it[1], it[1] to it[0]) }.toSet()
 
 /** Letter groups OCR reads as one letter, or one letter as two. */
@@ -114,15 +120,35 @@ private val MERGES = listOf("rn" to "m", "cl" to "d", "vv" to "w", "ri" to "n", 
 /**
  * [text] with each word that isn't on its paragraph's word list, and that OCR wasn't sure of (in
  * [unsure], lowercase) or that has a digit in it, replaced by the likeliest common word one slip away.
- * Short words, words that appear twice and names (capitalised inside a sentence) are left alone.
+ * Short words, words that appear twice and names (capitalised inside a sentence) are left alone, and
+ * so are paragraphs too garbled to mend a word at a time (see [GARBLED]).
  */
 fun correctWords(text: String, spans: List<LanguageSpan>, unsure: Set<String>, lists: (String) -> WordList?): String {
     if (spans.isEmpty()) return text
     val counts = TOKEN.findAll(text).groupingBy { it.value.lowercase() }.eachCount()
     return pieces(text, spans).joinToString("") { (tag, piece) ->
         val list = lists(tag) ?: return@joinToString piece
-        TOKEN.replace(piece) { match -> corrected(match.value, piece, match.range.first, list, unsure, counts) ?: match.value }
+        val garbled = paragraphRanges(piece).filter { garbled(piece.substring(it.first, it.last + 1), list) }
+        TOKEN.replace(piece) { match ->
+            if (garbled.any { match.range.first in it }) match.value
+            else corrected(match.value, piece, match.range.first, list, unsure, counts) ?: match.value
+        }
     }
+}
+
+/**
+ * More than this share of a paragraph's words not being common words means it was badly misread: the
+ * nearest real word to each is more likely wrong than right ("perto" for "perform" became "porto").
+ */
+private const val GARBLED = 0.4
+
+/** For telling a garbled paragraph, only words this common count (one in a million): the lists hold plenty of rare oddities like "clo". */
+private const val COMMON = 18
+
+private fun garbled(paragraph: String, list: WordList): Boolean {
+    // Lowercase words only: capitalised ones are often names, which no list has.
+    val words = TOKEN.findAll(paragraph).map { it.value }.filter { w -> w.length >= 3 && w.all { it.isLowerCase() } }.toList()
+    return words.size >= 4 && words.count { list.frequency(it.lowercase()) < COMMON } > GARBLED * words.size
 }
 
 private fun corrected(token: String, piece: String, start: Int, list: WordList, unsure: Set<String>, counts: Map<String, Int>): String? {
@@ -137,7 +163,8 @@ private fun corrected(token: String, piece: String, start: Int, list: WordList, 
     val best = if (known >= 0) {
         accented(lower, list).maxByOrNull { it.second }?.takeIf { it.second >= known + ACCENT_GAIN }
     } else {
-        candidates(lower, list).maxByOrNull { it.second }?.takeIf { it.second >= MIN_SCORE }
+        val ranked = candidates(lower, list).sortedByDescending { it.second }
+        ranked.firstOrNull()?.takeIf { it.second >= MIN_SCORE && (ranked.size < 2 || it.second - ranked[1].second >= AMBIGUOUS) }
     } ?: return null
     return when {
         token.filter { it.isLetter() }.all { it.isUpperCase() } && token.count { it.isLetter() } > 1 -> best.first.uppercase()
@@ -152,7 +179,12 @@ private fun startsSentence(piece: String, start: Int): Boolean {
     return before.isEmpty() || before.last() in ".!?:\n"
 }
 
-/** Real words one slip from [word], each with how common it is less what the slip costs. */
+/**
+ * Real words one OCR slip from [word], each with how common it is less what the slip costs. Only
+ * slips OCR makes count: a look-alike or accented letter, letters read as one or one as two, a stray
+ * digit or mark, a lost thin letter. Any other one-letter change too easily finds a common word
+ * that isn't what was written ("buit" isn't "but").
+ */
 private fun candidates(word: String, list: WordList): List<Pair<String, Int>> {
     val found = HashMap<String, Int>()
     fun consider(candidate: String, cost: Int) {
@@ -166,15 +198,13 @@ private fun candidates(word: String, list: WordList): List<Pair<String, Int>> {
         val c = word[i]
         val head = word.substring(0, i)
         val tail = word.substring(i + 1)
-        consider(head + tail, if (!c.isLetter()) 0 else EDIT_COST)
+        if (!c.isLetter()) consider(head + tail, 0)
         for (letter in list.letters) {
-            if (letter == c) continue
-            val alike = (c to letter) in LOOKALIKES || base(c) == base(letter)
-            consider(head + letter + tail, if (alike) 0 else EDIT_COST)
+            if (letter != c && ((c to letter) in LOOKALIKES || base(c) == base(letter))) consider(head + letter + tail, 0)
         }
     }
-    for (i in 0..word.length) for (letter in list.letters) {
-        consider(word.substring(0, i) + letter + word.substring(i), EDIT_COST)
+    for (i in 0..word.length) for (letter in THIN) {
+        consider(word.substring(0, i) + letter + word.substring(i), THIN_COST)
     }
     for ((from, to) in MERGES) {
         var i = word.indexOf(from)

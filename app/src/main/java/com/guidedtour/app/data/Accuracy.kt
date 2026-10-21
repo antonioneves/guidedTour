@@ -1,11 +1,15 @@
 package com.guidedtour.app.data
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import kotlin.math.min
 
 /**
  * Developer tool: measures OCR accuracy on your own photos. Put `name.jpg` (or .png) and `name.txt`
@@ -66,8 +70,16 @@ object Accuracy {
         return if (a.size != b.size) emptyList() else a.indices.filter { a[it] != b[it] }.map { "${a[it]} → ${b[it]}" }
     }
 
+    /** The photo upright, as the camera would have given it (phone photos are often stored sideways with an EXIF tag). */
     private fun decode(file: File) = BitmapFactory.decodeFile(file.path)?.let { raw ->
-        val scale = 2600f / maxOf(raw.width, raw.height)
-        if (scale < 1f) android.graphics.Bitmap.createScaledBitmap(raw, (raw.width * scale).toInt(), (raw.height * scale).toInt(), true) else raw
+        val turn = when (runCatching { ExifInterface(file.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, 0) }.getOrDefault(0)) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+        val scale = min(1f, 2600f / maxOf(raw.width, raw.height))
+        if (turn == 0f && scale == 1f) raw
+        else Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, Matrix().apply { postRotate(turn); postScale(scale, scale) }, true)
     }
 }

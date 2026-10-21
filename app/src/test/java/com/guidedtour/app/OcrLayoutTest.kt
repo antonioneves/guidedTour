@@ -56,6 +56,19 @@ class OcrLayoutTest {
         assertEquals(listOf(main), dropNoise(listOf(main, credit, page)))
     }
 
+    @Test fun aBigTitleDoesNotMakeTheInstructionsCaptions() {
+        val title = block("Low Row", 0, 0, height = 175)
+        val steps = listOf(
+            "1 Select a resistance level that enables you to perform the movement correctly.",
+            "2 Sit down in an upright position with the legs slightly bent at the knees.",
+            "3 Pull the handle to the upper abdominals keeping the elbows close to your sides.",
+        ).mapIndexed { i, text -> block(text, 0, 200 + 60 * i, height = 47) }
+        val caution = block("CAUTION", 0, 400, height = 34)
+        val credit = block("www.example.com", 0, 600, height = 20)
+        val all = listOf(title) + steps + caution
+        assertEquals(all, dropNoise(all + credit))
+    }
+
     // A 2000 x 1500 photo with the plaque in the middle.
     private val body = listOf(
         block("The Parthenon was built between 447 and 432 BC", 500, 500, width = 1000),

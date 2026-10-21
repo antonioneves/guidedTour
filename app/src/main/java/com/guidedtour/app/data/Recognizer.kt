@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import androidx.camera.core.ImageProxy
 import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -51,6 +52,12 @@ private class Pass(val script: OcrScript, val blocks: List<OcrBlock>, val width:
 object Recognizer {
     /** Longest side of the photo we keep: plenty for OCR, and small enough to avoid running out of memory. */
     private const val MAX_SIDE = 2600
+
+    /** Lines this many pixels tall read reliably; smaller ones are enlarged towards it in the second pass. */
+    private const val SHARP_LETTER = 32f
+
+    /** Enlarging more than this only blurs. */
+    private const val MAX_ZOOM = 3f
 
     private val clients = HashMap<OcrScript, TextRecognizer>()
     private val languageId by lazy { LanguageIdentification.getClient() }
@@ -95,7 +102,8 @@ object Recognizer {
             for (degrees in listOf(90, 270)) {
                 val turned = withContext(Dispatchers.Default) { rotated(bitmap, degrees.toFloat()) }
                 val pass = firstPass(turned, script)
-                if (isBetter(pass.reading, first.reading)) {
+                // ML Kit reads sideways text too, so a turn only wins if it lays the lines down flat.
+                if (!looksSideways(pass.blocks) && isBetter(pass.reading, first.reading)) {
                     if (source !== bitmap) source.recycle()
                     source = turned
                     turn = degrees
@@ -162,46 +170,55 @@ object Recognizer {
         }
 
     /**
-     * A copy of [bitmap] with text seen at an angle stretched back square, tilted text straightened
-     * (or else cropped to the text), and contrast raised.
+     * A copy of [bitmap] cropped to the text, with text seen at an angle stretched back square or
+     * tilted text straightened, small letters enlarged, and contrast raised.
      */
     private fun enhanced(bitmap: Bitmap, blocks: List<OcrBlock>): Bitmap {
         val lines = blocks.flatMap { it.lines }
         val tilt = lines.map { it.angle }.sorted()[lines.size / 2]
-        var source = bitmap
-        val squared = textQuad(lines)?.let { squared(bitmap, it) }
-        if (squared != null) {
-            source = squared
-        } else if (abs(tilt) in 2f..30f) {
-            source = rotated(bitmap, -tilt)
-        } else {
-            val left = lines.minOf { it.left }
-            val top = lines.minOf { it.top }
-            val right = lines.maxOf { it.right }
-            val bottom = lines.maxOf { it.bottom }
-            if ((right - left).toLong() * (bottom - top) < 0.7 * bitmap.width * bitmap.height) {
-                val padX = ((right - left) * 0.08f).toInt() + 8
-                val padY = ((bottom - top) * 0.08f).toInt() + 8
-                val x = max(0, left - padX)
-                val y = max(0, top - padY)
-                source = Bitmap.createBitmap(bitmap, x, y, min(bitmap.width - x, right - left + 2 * padX), min(bitmap.height - y, bottom - top + 2 * padY))
-            }
+        // Small letters read poorly: enlarge them towards SHARP_LETTER, as far as MAX_SIDE allows.
+        val size = lines.map { it.size }.sorted()[lines.size / 2]
+        val zoom = (SHARP_LETTER / max(1, size)).coerceIn(1f, MAX_ZOOM)
+        val source = textQuad(lines)?.let { squared(bitmap, it, zoom) } ?: run {
+            val crop = cropped(bitmap, lines)
+            val straight = if (abs(tilt) in 2f..30f) rotated(crop, -tilt).also { if (crop !== bitmap) crop.recycle() } else crop
+            enlarged(straight, zoom).also { if (it !== straight && straight !== bitmap) straight.recycle() }
         }
         return contrast(source).also { if (source !== bitmap) source.recycle() }
+    }
+
+    /** [bitmap] cropped to [lines] with a margin, unless they fill most of it anyway. */
+    private fun cropped(bitmap: Bitmap, lines: List<OcrLine>): Bitmap {
+        val left = lines.minOf { it.left }
+        val top = lines.minOf { it.top }
+        val right = lines.maxOf { it.right }
+        val bottom = lines.maxOf { it.bottom }
+        if ((right - left).toLong() * (bottom - top) >= 0.7 * bitmap.width * bitmap.height) return bitmap
+        val padX = ((right - left) * 0.08f).toInt() + 8
+        val padY = ((bottom - top) * 0.08f).toInt() + 8
+        val x = max(0, left - padX)
+        val y = max(0, top - padY)
+        return Bitmap.createBitmap(bitmap, x, y, min(bitmap.width - x, right - left + 2 * padX), min(bitmap.height - y, bottom - top + 2 * padY))
+    }
+
+    /** [bitmap] scaled up by [zoom], or less if that would pass [MAX_SIDE]; itself if that's barely bigger. */
+    private fun enlarged(bitmap: Bitmap, zoom: Float): Bitmap {
+        val scale = min(zoom, MAX_SIDE.toFloat() / max(bitmap.width, bitmap.height))
+        return if (scale < 1.1f) bitmap else bitmap.scale((bitmap.width * scale).toInt(), (bitmap.height * scale).toInt())
     }
 
     /**
      * The text area [quad] (see [textQuad]) of [bitmap] stretched to a rectangle with a margin around
      * it, or null if it can't be. The text's true proportions are unknown, so each side gets the
-     * longer of its two edges, keeping the most detail.
+     * longer of its two edges, keeping the most detail, enlarged by [zoom] if there's room.
      */
-    private fun squared(bitmap: Bitmap, quad: FloatArray): Bitmap? {
+    private fun squared(bitmap: Bitmap, quad: FloatArray, zoom: Float): Bitmap? {
         fun edge(a: Int, b: Int) = kotlin.math.hypot(quad[2 * b] - quad[2 * a], quad[2 * b + 1] - quad[2 * a + 1])
         var width = max(edge(0, 1), edge(3, 2))
         var height = max(edge(0, 3), edge(1, 2))
         if (width < 32f || height < 16f) return null
         var margin = 0.08f * max(width, height)
-        val scale = min(1f, MAX_SIDE / (max(width, height) + 2 * margin))
+        val scale = min(zoom, MAX_SIDE / (max(width, height) + 2 * margin))
         width *= scale; height *= scale; margin *= scale
         val target = floatArrayOf(margin, margin, margin + width, margin, margin + width, margin + height, margin, margin + height)
         val matrix = Matrix()
