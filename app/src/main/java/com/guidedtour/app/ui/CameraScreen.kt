@@ -514,26 +514,12 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp))
         if (flash.value > 0f) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
 
-        // Auto capture on the left of the shutter, the flash on the right.
+        // The flash on the left of the shutter, auto capture on the right.
         Row(
             Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp),
             horizontalArrangement = Arrangement.spacedBy(28.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CameraToggle(
-                checked = autoCapture,
-                onToggle = ::toggleAutoCapture,
-                icon = Icons.Filled.AutoMode,
-                label = "Auto capture",
-                iconAngle = iconAngle,
-            )
-            if (state == ScanState.Processing) {
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.size(92.dp)) {
-                    Box(contentAlignment = Alignment.Center) { LoadingIndicator() }
-                }
-            } else {
-                Shutter(progress = countdown.value, iconAngle = iconAngle, onClick = ::capture)
-            }
             if (hasFlash) {
                 CameraToggle(
                     checked = torch,
@@ -546,6 +532,20 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                 // Keeps the shutter centred.
                 Spacer(Modifier.size(CAMERA_TOGGLE_SIZE))
             }
+            if (state == ScanState.Processing) {
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.size(92.dp)) {
+                    Box(contentAlignment = Alignment.Center) { LoadingIndicator() }
+                }
+            } else {
+                Shutter(progress = countdown.value, iconAngle = iconAngle, onClick = ::capture)
+            }
+            CameraToggle(
+                checked = autoCapture,
+                onToggle = ::toggleAutoCapture,
+                icon = Icons.Filled.AutoMode,
+                label = "Auto capture",
+                iconAngle = iconAngle,
+            )
         }
     }
 }
