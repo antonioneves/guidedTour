@@ -510,6 +510,7 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
     val duckMusic by settings.duckMusic.collectAsStateWithLifecycle()
     val careful by settings.carefulCapture.collectAsStateWithLifecycle()
     val placePhotos by settings.placePhotos.collectAsStateWithLifecycle()
+    val correctWords by settings.correctWords.collectAsStateWithLifecycle()
     val report by viewModel.accuracyReport.collectAsStateWithLifecycle()
     val script by settings.script.collectAsStateWithLifecycle()
     var showCredits by remember { mutableStateOf(false) }
@@ -564,6 +565,11 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
                 "Automatic tries Latin letters first, then Chinese, Japanese, Korean and Devanagari.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SwitchRow(
+                "Correct misread words",
+                "Replaces words the camera misread with the likeliest real word in the text's language, using word lists on the phone.",
+                correctWords, settings::setCorrectWords,
             )
             SwitchRow(
                 "Careful capture",

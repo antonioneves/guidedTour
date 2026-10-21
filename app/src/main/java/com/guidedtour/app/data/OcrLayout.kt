@@ -3,12 +3,13 @@ package com.guidedtour.app.data
 import kotlin.math.max
 import kotlin.math.min
 
-/** One recognised line with its pixel box, ML Kit's confidence and its tilt in degrees. */
+/** One recognised line with its pixel box, ML Kit's confidence, its tilt in degrees and its words with their confidence. */
 data class OcrLine(
     val text: String,
     val left: Int, val top: Int, val right: Int, val bottom: Int,
     val confidence: Float = 1f,
     val angle: Float = 0f,
+    val words: List<Pair<String, Float>> = emptyList(),
 ) {
     val height: Int get() = bottom - top
 }
@@ -160,6 +161,11 @@ fun layoutText(blocks: List<OcrBlock>, width: Int = 0, height: Int = 0): String 
         .map { fixConfusables(it.text) }
         .filter { it.isNotBlank() }
         .joinToString("\n\n")
+
+/** The words ML Kit was unsure of (lowercase, without punctuation), for correcting against a word list. */
+fun unsureWords(blocks: List<OcrBlock>): Set<String> =
+    blocks.flatMap { it.lines }.flatMap { it.words }.filter { it.second < SURE_CONFIDENCE }
+        .map { it.first.trim { c -> !c.isLetterOrDigit() && c != '|' }.lowercase() }.filter { it.isNotEmpty() }.toSet()
 
 /** Average confidence weighted by how much text each line holds. */
 fun meanConfidence(blocks: List<OcrBlock>): Float {

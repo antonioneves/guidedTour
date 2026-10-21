@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.guidedtour.app.data.AppDatabase
 import com.guidedtour.app.data.Accuracy
 import com.guidedtour.app.data.CloudOcr
+import com.guidedtour.app.data.WordLists
 import com.guidedtour.app.data.Locator
 import com.guidedtour.app.data.PhotoSpot
 import com.guidedtour.app.data.PlacePhotos
@@ -25,6 +26,9 @@ import com.guidedtour.app.data.mainLanguage
 import com.guidedtour.app.data.encodeSpans
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -35,6 +39,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
 
 sealed interface ScanState {
     data object Idle : ScanState
@@ -49,6 +54,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     private val reader = TextReader.get(app)
     val settings = Settings.get(app)
     val placePhotos = PlacePhotos.get(app)
+    private val wordLists = WordLists.get(app)
 
     // Loaded from the start, so Guides rarely opens before the database has been read; null until then.
     private val loadedScans: StateFlow<List<Scan>?> = dao.observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -71,6 +77,16 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     /** Hardware-button shutter presses (see MainActivity). */
     private val _shutter = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val shutter: SharedFlow<Unit> = _shutter
+
+    init {
+        // A word list takes about a second to load: have the likely languages ready before the first scan.
+        viewModelScope.launch(Dispatchers.Default) {
+            delay(3_000)
+            if (!settings.correctWords.value) return@launch
+            val recent = loadedScans.filterNotNull().first().take(20).mapNotNull { it.languageTag }
+            (listOf(Locale.getDefault().language) + recent).distinct().take(2).forEach { wordLists.of(it) }
+        }
+    }
     val scanTabVisible = MutableStateFlow(true)
 
     val volumeShutterActive: Boolean get() = settings.volumeShutter.value && scanTabVisible.value
@@ -112,27 +128,31 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         bestSharpness = -1.0
         viewModelScope.launch {
             if (frame == null) {
-                persist(liveText, null)
+                persist(liveText, null, emptySet())
             } else {
                 val reading = Recognizer.read(frame, settings.script.value)
                 // Save the photo the way the text reads, if it had to be turned.
                 val photo = if (reading.turn == 0) frame else withContext(Dispatchers.Default) {
                     Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, android.graphics.Matrix().apply { postRotate(reading.turn.toFloat()) }, true)
                 }
-                persist(reading.text.ifBlank { liveText }, photo)
+                if (reading.text.isBlank()) persist(liveText, photo, emptySet()) else persist(reading.text, photo, reading.unsure)
             }
         }
     }
 
-    private suspend fun persist(text: String, photo: Bitmap?) {
-        android.util.Log.i("GuidedTour", "capture: read ${text.length} characters")
-        if (text.isBlank()) {
+    /** Saves and plays a scan of [read]; words in [unsure] that aren't real words in its language are corrected first. */
+    private suspend fun persist(read: String, photo: Bitmap?, unsure: Set<String>) {
+        android.util.Log.i("GuidedTour", "capture: read ${read.length} characters")
+        if (read.isBlank()) {
             _state.value = ScanState.NoText
             return
         }
         val location = locator.current()
         val spot = location?.let { locator.spot(it.latitude, it.longitude) }
-        val spans = Recognizer.detectLanguages(text, spot?.countryCode)
+        var spans = Recognizer.detectLanguages(read, spot?.countryCode)
+        val text = if (settings.correctWords.value) withContext(Dispatchers.Default) { wordLists.correct(read, spans, unsure) } else read
+        // Corrected words change where each language starts, and may make it clearer.
+        if (text != read) spans = Recognizer.detectLanguages(text, spot?.countryCode)
         val now = System.currentTimeMillis()
         val scan = Scan(
             text = text,

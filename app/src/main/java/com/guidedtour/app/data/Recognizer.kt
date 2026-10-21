@@ -27,8 +27,11 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** What OCR found: reading-order text (paragraphs split by a blank line) and how sure the engine was. */
-/** [turn] is how far, in degrees clockwise, the photo had to be turned for the text to read upright. */
-class Reading(val text: String, val confidence: Float, val letters: Int, val turn: Int = 0) {
+/**
+ * [turn] is how far, in degrees clockwise, the photo had to be turned for the text to read upright;
+ * [unsure] are the words the engine wasn't sure of, lowercase.
+ */
+class Reading(val text: String, val confidence: Float, val letters: Int, val turn: Int = 0, val unsure: Set<String> = emptySet()) {
     val isEmpty: Boolean get() = text.isBlank()
 }
 
@@ -38,7 +41,8 @@ private class Pass(val script: OcrScript, val blocks: List<OcrBlock>, val width:
     val reading: Reading
         get() {
             val text = layoutText(blocks, width, height)
-            return Reading(text, meanConfidence(kept), text.count { it.isLetterOrDigit() })
+            val kept = kept
+            return Reading(text, meanConfidence(kept), text.count { it.isLetterOrDigit() }, unsure = unsureWords(kept))
         }
 }
 
@@ -109,7 +113,7 @@ object Recognizer {
             if (isBetter(second, best)) best = second
         }
         if (source !== bitmap) source.recycle()
-        return Reading(best.text, best.confidence, best.letters, turn)
+        return Reading(best.text, best.confidence, best.letters, turn, best.unsure)
     }
 
     /** Most lines of three or more characters are taller than wide: the text is lying on its side. */
@@ -144,7 +148,7 @@ object Recognizer {
                 .addOnSuccessListener { text ->
                     cont.resume(text.textBlocks.mapNotNull { block ->
                         val lines = block.lines.mapNotNull { line ->
-                            line.boundingBox?.let { OcrLine(line.text, it.left, it.top, it.right, it.bottom, line.confidence, line.angle) }
+                            line.boundingBox?.let { OcrLine(line.text, it.left, it.top, it.right, it.bottom, line.confidence, line.angle, line.elements.map { e -> e.text to e.confidence }) }
                         }
                         if (lines.isEmpty()) null else OcrBlock(lines)
                     })

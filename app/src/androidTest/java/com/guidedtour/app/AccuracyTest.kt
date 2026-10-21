@@ -13,11 +13,12 @@ import java.io.File
  * Runs the accuracy report on the photos in /data/local/tmp/testset (see tools/make_ocr_testset.py)
  * and logs it under the tag "OCR_REPORT". The test process can't read the app's own folder, so push the
  * photos to /data/local/tmp/testset first: adb push OUTPUT_DIR/. /data/local/tmp/testset/
+ * Another folder can be given with `-e dir /data/local/tmp/other`.
  */
 class AccuracyTest {
     @Test fun report() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val report = runBlocking { Accuracy.run(context, OcrScript.Auto, File("/data/local/tmp/testset")) }
+        val report = runBlocking { Accuracy.run(context, OcrScript.Auto, File(InstrumentationRegistry.getArguments().getString("dir") ?: "/data/local/tmp/testset")) }
         report.lines().forEach { Log.i("OCR_REPORT", it) }
         assertFalse(report.startsWith("No test photos"))
     }

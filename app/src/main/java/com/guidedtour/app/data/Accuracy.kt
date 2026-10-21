@@ -24,6 +24,8 @@ object Accuracy {
         val report = StringBuilder()
         var basicTotal = 0.0
         var improvedTotal = 0.0
+        var correctedTotal = 0.0
+        val lists = WordLists.get(context)
         var languagesChecked = 0
         var languagesRight = 0
         for (file in images) {
@@ -32,12 +34,17 @@ object Accuracy {
             val basic = characterErrorRate(truth, Recognizer.read(bitmap, script, enhance = false).text)
             val reading = Recognizer.read(bitmap, script, enhance = true)
             val improved = characterErrorRate(truth, reading.text)
+            val spans = Recognizer.detectLanguages(reading.text)
+            val fixed = lists.correct(reading.text, spans, reading.unsure)
+            val corrected = characterErrorRate(truth, fixed)
             basicTotal += basic
             improvedTotal += improved
-            report.appendLine("%-24s basic %5.1f%%   improved %5.1f%%".format(Locale.US, file.name.take(24), basic * 100, improved * 100))
+            correctedTotal += corrected
+            report.appendLine("%-24s basic %5.1f%%   improved %5.1f%%   corrected %5.1f%%".format(Locale.US, file.name.take(24), basic * 100, improved * 100, corrected * 100))
+            changedWords(reading.text, fixed).forEach { report.appendLine("    $it") }
             File(dir, file.nameWithoutExtension + ".lang").takeIf { it.exists() }?.let { expectedFile ->
                 val expected = expectedFile.readText().trim().split(',').map { it.trim() }
-                val found = Recognizer.detectLanguages(reading.text).map { it.tag }
+                val found = spans.map { it.tag }
                 languagesChecked++
                 if (found == expected) languagesRight++
                 report.appendLine("%-24s languages %s (expected %s)%s".format(Locale.US, "", found.joinToString("+").ifEmpty { "unknown" }, expected.joinToString("+"), if (found == expected) "" else "  wrong"))
@@ -45,9 +52,16 @@ object Accuracy {
         }
         val n = images.size
         report.appendLine()
-        report.appendLine("%d photos. Average character error: basic %.1f%%, improved %.1f%%".format(Locale.US, n, basicTotal / n * 100, improvedTotal / n * 100))
+        report.appendLine("%d photos. Average character error: basic %.1f%%, improved %.1f%%, corrected %.1f%%".format(Locale.US, n, basicTotal / n * 100, improvedTotal / n * 100, correctedTotal / n * 100))
         if (languagesChecked > 0) report.appendLine("Languages detected right: %d of %d".format(Locale.US, languagesRight, languagesChecked))
         report.toString().also { runCatching { File(dir, "report.txt").writeText(it) } }
+    }
+
+    /** The words correction changed, as "misread → corrected". */
+    private fun changedWords(before: String, after: String): List<String> {
+        val a = before.split(Regex("\\s+"))
+        val b = after.split(Regex("\\s+"))
+        return if (a.size != b.size) emptyList() else a.indices.filter { a[it] != b[it] }.map { "${a[it]} → ${b[it]}" }
     }
 
     private fun decode(file: File) = BitmapFactory.decodeFile(file.path)?.let { raw ->

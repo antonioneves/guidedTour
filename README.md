@@ -9,6 +9,9 @@ scanned, and reads it aloud, also with the screen off.
 - **Scan**: live text recognition with tips for a better photo (too dark, too small, cut off,
   shaky, glare). Capture with the shutter button or the volume key, or let it capture
   automatically once the text looks readable. Optionally takes three photos and keeps the sharpest.
+- **Correct misread words**: words the camera wasn't sure of, and that aren't real words in their
+  paragraph's language, are replaced by the likeliest common word one OCR slip away ("tcmple" →
+  "temple", "construido" → "construído"). Uses word lists on the phone for about 30 languages.
 - **Read aloud**: sentence by sentence, with the current word highlighted. Plays in the
   background with lock-screen and headphone controls, and pauses other audio while reading.
   Speed, pitch and voice (per language) are adjustable.
@@ -98,7 +101,7 @@ The result is written to `app/src/release/generated/baselineProfiles/`; commit i
 ./gradlew :app:testDebugUnitTest
 ```
 
-Unit tests cover text layout and clean-up, sentence splitting, photo tips, analysis throttling
+Unit tests cover text layout and clean-up, misread-word correction, sentence splitting, photo tips, analysis throttling
 and visit grouping.
 
 **OCR accuracy**: `tools/make_ocr_testset.py` generates synthetic plaque photos with their true
@@ -116,6 +119,12 @@ adb shell am instrument -w -e class com.guidedtour.app.AccuracyTest \
 `.github/workflows/tests.yml` runs the unit tests and this instrumented test (on an emulator) on
 every push and pull request.
 
+The report also shows the error after misread words are corrected, and each word it changed. Another
+folder of photos can be given with `-e dir /data/local/tmp/other`.
+
+To regenerate the word lists (after a wordfreq update), run `pip install wordfreq` and
+`python3 tools/make_wordlists.py app/src/main/assets/words`.
+
 The same test is available in the app under Settings → Developer. Real plaque photos with typed
 transcripts give far more useful numbers than the synthetic set.
 
@@ -129,7 +138,8 @@ transcripts give far more useful numbers than the synthetic set.
 | `app/schemas/` | Exported Room database schemas (for migrations) |
 | `baselineprofile/` | Baseline profile generator |
 | `design/` | App icon and store graphics generator (see [design/README.md](design/README.md)) |
-| `tools/` | OCR test set generator |
+| `tools/` | OCR test set and word list generators |
+| `app/src/main/assets/words/` | Word lists for correcting misread words (from `tools/make_wordlists.py`) |
 | `IMPROVEMENTS.md` | Ideas and their status |
 | `PRIVACY.md` | Privacy policy |
 
@@ -153,6 +163,10 @@ If you modify this program, or any covered work, by linking or combining it with
 services (`com.google.android.gms`) or Google ML Kit (`com.google.mlkit`), or a modified version of
 those libraries, containing parts covered by the terms of their license agreements, the licensors
 of this program grant you additional permission to convey the resulting work.
+
+The word lists in `app/src/main/assets/words/` are derived from
+[wordfreq](https://github.com/rspeer/wordfreq) by Robyn Speer and are licensed under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
 The libraries and services it uses keep their own licenses; they are listed in the app under
 Settings → Credits.
