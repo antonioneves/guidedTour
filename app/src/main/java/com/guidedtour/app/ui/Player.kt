@@ -554,7 +554,7 @@ private fun VoiceSection(viewModel: TourViewModel) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         else -> {
-            val options = listOf(VoiceOption(null, "Automatic", "Best installed voice")) +
+            val options = listOf(VoiceOption(null, "Automatic", "Picked for your region and connection")) +
                 voices.mapIndexed { index, voice ->
                     val region = voice.locale.displayCountry
                     VoiceOption(
