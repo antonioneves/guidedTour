@@ -1,5 +1,23 @@
 package com.guidedtour.app.ui
 
+import com.guidedtour.app.data.QueueItem
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.gestures.detectDragGestures
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.foundation.Image
@@ -295,52 +313,151 @@ fun QueueSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
             return@ModalBottomSheet
         }
         Text(
-            "New scans join the end of the queue while you keep exploring.",
+            "Drag ≡ to reorder what's next, swipe a card away to remove it.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp),
         )
-        LazyColumn(Modifier.fillMaxWidth()) {
+        val listState = rememberLazyListState()
+        val queue by rememberUpdatedState(player.queue)
+        val index by rememberUpdatedState(player.index)
+        // The card being dragged, where it was when picked up, and how far the finger has moved since.
+        var dragKey by remember { mutableStateOf<Long?>(null) }
+        var dragStart by remember { mutableIntStateOf(0) }
+        var dragDistance by remember { mutableFloatStateOf(0f) }
+        fun dragBy(delta: Float) {
+            dragDistance += delta
+            val visible = listState.layoutInfo.visibleItemsInfo
+            val dragged = visible.firstOrNull { it.key == dragKey } ?: return
+            val centre = dragStart + dragDistance + dragged.size / 2
+            val over = visible.firstOrNull { it.key != dragKey && centre.toInt() in it.offset until it.offset + it.size } ?: return
+            val from = queue.indexOfFirst { it.key == dragKey }
+            val to = queue.indexOfFirst { it.key == over.key }
+            // Only what's still to come can be reordered; the current text keeps playing.
+            if (from > index && to > index) viewModel.moveInQueue(from, to - from)
+        }
+        LazyColumn(
+            Modifier.fillMaxWidth(),
+            state = listState,
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             itemsIndexed(player.queue, key = { _, it -> it.key }) { position, item ->
-                val current = position == player.index
-                val played = position < player.index
-                ListItem(
-                    colors = ListItemDefaults.colors(
-                        containerColor = if (current) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                    ),
-                    overlineContent = {
-                        Text(
-                            when {
-                                current && player.playing -> "Now playing"
-                                current -> "Paused"
-                                played -> "Played"
-                                else -> "Up next"
-                            }
+                val dragging = item.key == dragKey
+                val upcoming = position > player.index
+                QueueCard(
+                    item, viewModel,
+                    status = when {
+                        position == player.index && player.playing -> "Now playing"
+                        position == player.index -> "Paused"
+                        position < player.index -> "Played"
+                        else -> "Up next"
+                    },
+                    current = position == player.index,
+                    dragging = dragging,
+                    onRemove = { viewModel.removeFromQueue(position) },
+                    onMoveEarlier = if (upcoming && position > player.index + 1) ({ viewModel.moveInQueue(position, -1) }) else null,
+                    onMoveLater = if (upcoming && position < player.queue.lastIndex) ({ viewModel.moveInQueue(position, 1) }) else null,
+                    handleModifier = if (!upcoming) Modifier else Modifier.pointerInput(item.key) {
+                        detectDragGestures(
+                            onDragStart = {
+                                dragKey = item.key
+                                dragStart = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == item.key }?.offset ?: 0
+                                dragDistance = 0f
+                            },
+                            onDrag = { change, amount -> change.consume(); dragBy(amount.y) },
+                            onDragEnd = { dragKey = null },
+                            onDragCancel = { dragKey = null },
                         )
                     },
-                    headlineContent = {
-                        Text(
-                            (if (item.translated) "Translation · " else "") + item.title,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    supportingContent = { Text(item.text, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                    trailingContent = {
-                        Row {
-                            if (position > player.index) {
-                                IconButton(onClick = { viewModel.moveInQueue(position, -1) }, enabled = position > player.index + 1) {
-                                    Icon(Icons.Filled.KeyboardArrowUp, "Move earlier")
-                                }
-                                IconButton(onClick = { viewModel.moveInQueue(position, 1) }, enabled = position < player.queue.lastIndex) {
-                                    Icon(Icons.Filled.KeyboardArrowDown, "Move later")
-                                }
-                            }
-                            IconButton(onClick = { viewModel.removeFromQueue(position) }) {
-                                Icon(Icons.Filled.Close, "Remove from queue")
-                            }
+                    modifier = if (dragging) {
+                        // Follows the finger: where it was picked up, plus the drag, less where the list has put it now.
+                        Modifier.zIndex(1f).graphicsLayer {
+                            val now = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == item.key }?.offset ?: dragStart
+                            translationY = dragStart + dragDistance - now
                         }
-                    },
+                    } else Modifier.animateItem(),
                 )
+            }
+        }
+    }
+}
+
+/**
+ * A text in the reading queue, as a card with its place's photo. Swiping it away removes it; an
+ * upcoming one has a handle ([handleModifier]) to drag it to another place in the queue.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QueueCard(
+    item: QueueItem,
+    viewModel: TourViewModel,
+    status: String,
+    current: Boolean,
+    dragging: Boolean,
+    onRemove: () -> Unit,
+    onMoveEarlier: (() -> Unit)?,
+    onMoveLater: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    handleModifier: Modifier = Modifier,
+) {
+    val currentRemove by rememberUpdatedState(onRemove)
+    val swipe = rememberSwipeToDismissBoxState()
+    val colors = MaterialTheme.colorScheme
+    SwipeToDismissBox(
+        swipe,
+        modifier = modifier,
+        gesturesEnabled = !dragging,
+        onDismiss = { currentRemove() },
+        backgroundContent = {
+            // A red strip with a bin, on the side the card is leaving from.
+            val alignment = if (swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart) Alignment.CenterEnd else Alignment.CenterStart
+            Box(
+                Modifier.fillMaxSize().clip(CardDefaults.shape).background(colors.errorContainer).padding(horizontal = 24.dp),
+                contentAlignment = alignment,
+            ) {
+                Icon(Icons.Filled.Delete, null, tint = colors.onErrorContainer)
+            }
+        },
+    ) {
+        val photo = rememberPlacePhoto(viewModel, item.spot)
+        ElevatedCard(
+            colors = CardDefaults.elevatedCardColors(containerColor = if (current) colors.primaryContainer else colors.surfaceContainerLow),
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = if (dragging) 8.dp else 1.dp),
+            modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
+                customActions = listOfNotNull(
+                    onMoveEarlier?.let { CustomAccessibilityAction("Move earlier") { it(); true } },
+                    onMoveLater?.let { CustomAccessibilityAction("Move later") { it(); true } },
+                )
+            },
+        ) {
+            Row(Modifier.padding(start = 12.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(56.dp).clip(MaterialTheme.shapes.medium).background(colors.secondaryContainer), contentAlignment = Alignment.Center) {
+                    if (photo != null) Image(photo.image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    else Icon(Icons.Filled.Place, null, tint = colors.onSecondaryContainer)
+                }
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                    Text(status, style = MaterialTheme.typography.labelMedium, color = if (current) colors.onPrimaryContainer else colors.primary)
+                    Text(
+                        (if (item.translated) "Translation · " else "") + item.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        item.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (onMoveEarlier != null || onMoveLater != null) {
+                    Icon(
+                        Icons.Filled.DragHandle, "Drag to reorder",
+                        handleModifier.size(48.dp).padding(12.dp),
+                        tint = colors.onSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onRemove) { Icon(Icons.Filled.Close, "Remove from queue") }
             }
         }
     }
