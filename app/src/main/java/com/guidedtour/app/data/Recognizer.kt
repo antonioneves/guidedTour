@@ -217,9 +217,20 @@ object Recognizer {
         return score
     }
 
-    suspend fun detectLanguage(text: String): String? = suspendCancellableCoroutine { cont ->
-        languageId.identifyLanguage(text)
-            .addOnSuccessListener { cont.resume(it.takeIf { tag -> tag != "und" }) }
-            .addOnFailureListener { cont.resume(null) }
+    /**
+     * The languages of [text] paragraph by paragraph, so a bilingual plaque gets one span per language.
+     * [country] is where the photo was taken, if known (see [pickLanguage]).
+     */
+    suspend fun detectLanguages(text: String, country: String? = null): List<LanguageSpan> =
+        detectSpans(text) { detectLanguage(it, country) }
+
+    /** Every language [text] might be in, with ML Kit's confidence, most likely first. */
+    suspend fun possibleLanguages(text: String): List<Pair<String, Float>> = suspendCancellableCoroutine { cont ->
+        languageId.identifyPossibleLanguages(text)
+            .addOnSuccessListener { list -> cont.resume(list.map { it.languageTag to it.confidence }.filter { it.first != "und" }) }
+            .addOnFailureListener { cont.resume(emptyList()) }
     }
+
+    /** The language of [text], or null if unsure; see [pickLanguage]. */
+    suspend fun detectLanguage(text: String, country: String? = null): String? = pickLanguage(possibleLanguages(text), country)
 }

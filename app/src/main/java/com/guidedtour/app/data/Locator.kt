@@ -29,15 +29,17 @@ class Locator(private val context: Context) {
         null
     }
 
+    /** What's at a spot: its name, and the country's code (e.g. "PT"), which helps tell close languages apart. */
+    data class Spot(val name: String?, val countryCode: String?)
+
     @Suppress("DEPRECATION")
-    suspend fun placeName(lat: Double, lng: Double): String? = withContext(Dispatchers.IO) {
+    suspend fun spot(lat: Double, lng: Double): Spot = withContext(Dispatchers.IO) {
         try {
-            if (!Geocoder.isPresent()) return@withContext null
-            val a = Geocoder(context).getFromLocation(lat, lng, 1)?.firstOrNull() ?: return@withContext null
-            a.featureName?.takeIf { it.isNotBlank() && it != a.subThoroughfare }
-                ?: a.thoroughfare ?: a.locality
+            if (!Geocoder.isPresent()) return@withContext Spot(null, null)
+            val a = Geocoder(context).getFromLocation(lat, lng, 1)?.firstOrNull() ?: return@withContext Spot(null, null)
+            Spot(a.featureName?.takeIf { it.isNotBlank() && it != a.subThoroughfare } ?: a.thoroughfare ?: a.locality, a.countryCode)
         } catch (e: Exception) {
-            null
+            Spot(null, null)
         }
     }
 }

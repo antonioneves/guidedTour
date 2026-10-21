@@ -23,6 +23,8 @@ data class QueueItem(
     val title: String,
     val text: String,
     val languageTag: String?,
+    /** Where the text switches language, for bilingual plaques; empty when it's all [languageTag]. */
+    val spans: List<LanguageSpan> = emptyList(),
 ) {
     val key: Long get() = id * 2 + if (translated) 1 else 0
 }
@@ -228,7 +230,14 @@ class TextReader private constructor(context: Context) {
         index = position
         val item = queue[position]
         val maxLen = minOf(TextToSpeech.getMaxSpeechInputLength() - 1, 1500)
-        chunks = splitForSpeech(item.text, maxLen, localeFor(item.languageTag))
+        // Split each language's part on its own, so no sentence mixes two languages.
+        chunks = if (item.spans.size > 1) {
+            pieces(item.text, item.spans).zip(item.spans).flatMap { (piece, span) ->
+                splitForSpeech(piece.second, maxLen, localeFor(span.tag)).map { Chunk(span.start + it.start, it.text) }
+            }
+        } else {
+            splitForSpeech(item.text, maxLen, localeFor(item.languageTag))
+        }
         chunkIndex = 0
         startInChunk = 0
         lastWordOffset = -1
@@ -244,7 +253,8 @@ class TextReader private constructor(context: Context) {
         val run = run@{
             val item = queue.getOrNull(index) ?: return@run
             val chunk = chunks.getOrNull(chunkIndex) ?: return@run
-            val locale = localeFor(item.languageTag)
+            // Each part of a bilingual text is read with a voice for its own language.
+            val locale = localeFor(item.spans.at(chunk.start)?.tag ?: item.languageTag)
             configureVoice(locale, settings.voices.value[locale.language])
             val id = ++generation
             val text = chunk.text.substring(startInChunk.coerceAtMost(chunk.text.length))
@@ -260,7 +270,10 @@ class TextReader private constructor(context: Context) {
         val result = tts.setLanguage(locale)
         var effective = locale
         if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-            effective = Locale.getDefault()
+            // No voice for it: a close language reads it far better than the phone's (Galician as Portuguese).
+            val close = CLOSE_LANGUAGES[locale.language]?.let { Locale.forLanguageTag(it.wider) }
+            val closeResult = close?.let { tts.setLanguage(it) }
+            effective = if (close != null && closeResult != TextToSpeech.LANG_MISSING_DATA && closeResult != TextToSpeech.LANG_NOT_SUPPORTED) close else Locale.getDefault()
             tts.setLanguage(effective)
         }
         val chosen = chosenName?.let { name -> tts.voices.orEmpty().firstOrNull { it.name == name } }

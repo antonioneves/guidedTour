@@ -29,7 +29,18 @@ data class Scan(
     @ColumnInfo(defaultValue = "0") val favorite: Boolean = false,
     val translation: String? = null,
     val translationTag: String? = null,
-)
+    /** For a text in several languages, where each one starts (see [encodeSpans]); null for one language. */
+    val languages: String? = null,
+    /** True when the user chose [languageTag] by hand: it's kept, instead of detected again, when the text changes. */
+    @ColumnInfo(defaultValue = "0") val languageFixed: Boolean = false,
+) {
+    /** The languages of the text in reading order, or none if unknown. */
+    fun spans(): List<LanguageSpan> =
+        decodeSpans(languages).ifEmpty { listOfNotNull(languageTag?.let { LanguageSpan(0, it) }) }
+
+    /** Each language in the text once, in reading order. */
+    fun allLanguages(): List<String> = spans().map { it.tag }.distinct()
+}
 
 @Dao
 interface ScanDao {
@@ -42,8 +53,11 @@ interface ScanDao {
     @Query("DELETE FROM scans WHERE id = :id")
     suspend fun delete(id: Long)
 
-    @Query("UPDATE scans SET text = :text, languageTag = :languageTag, translation = NULL, translationTag = NULL WHERE id = :id")
-    suspend fun updateText(id: Long, text: String, languageTag: String?)
+    @Query("UPDATE scans SET text = :text, languageTag = :languageTag, languages = :languages, translation = NULL, translationTag = NULL WHERE id = :id")
+    suspend fun updateText(id: Long, text: String, languageTag: String?, languages: String?)
+
+    @Query("UPDATE scans SET languageTag = :languageTag, languages = :languages, languageFixed = :fixed, translation = NULL, translationTag = NULL WHERE id = :id")
+    suspend fun setLanguage(id: Long, languageTag: String?, languages: String?, fixed: Boolean)
 
     @Query("UPDATE scans SET favorite = :favorite WHERE id = :id")
     suspend fun setFavorite(id: Long, favorite: Boolean)
@@ -52,7 +66,7 @@ interface ScanDao {
     suspend fun setTranslation(id: Long, translation: String, tag: String)
 }
 
-@Database(entities = [Scan::class], version = 2, exportSchema = true)
+@Database(entities = [Scan::class], version = 3, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun scanDao(): ScanDao
 
@@ -67,9 +81,17 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v3 adds the languages of bilingual texts, and languages chosen by hand. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE scans ADD COLUMN languages TEXT")
+                db.execSQL("ALTER TABLE scans ADD COLUMN languageFixed INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "tour.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
     }
 }

@@ -31,7 +31,32 @@ object Translator {
         return source != target && TranslateLanguage.fromLanguageTag(source) != null
     }
 
+    /** True if any of [tags] (a text's languages) needs translating into [target]. */
+    fun needsTranslation(tags: List<String>, target: String): Boolean = tags.any { needsTranslation(it, target) }
+
     private fun languageOf(tag: String) = Locale.forLanguageTag(tag).language
+
+    /**
+     * Translates a text that may mix languages: each span from its own language, leaving parts
+     * already in [target] as they are, and keeping the blank lines between parts.
+     */
+    suspend fun translate(text: String, spans: List<LanguageSpan>, target: String): Result {
+        if (spans.size <= 1) return translate(text, spans.firstOrNull()?.tag, target)
+        val out = StringBuilder()
+        for ((tag, piece) in pieces(text, spans)) {
+            val body = piece.trimEnd()
+            if (languageOf(tag) == target) {
+                out.append(body)
+            } else {
+                when (val result = translate(body, tag, target)) {
+                    is Result.Success -> out.append(result.text)
+                    is Result.Failure -> return result
+                }
+            }
+            out.append(piece.substring(body.length))
+        }
+        return Result.Success(out.toString())
+    }
 
     suspend fun translate(text: String, sourceTag: String?, target: String = Locale.getDefault().language): Result {
         val source = sourceTag?.let { TranslateLanguage.fromLanguageTag(languageOf(it)) }

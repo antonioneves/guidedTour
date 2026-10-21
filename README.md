@@ -18,7 +18,11 @@ scanned, and reads it aloud, also with the screen off.
   search, favourites, "Play visit", text editing and swipe to delete.
 - **Places**: an OpenStreetMap map of where each text was scanned, with the walking route of
   each day. No map key or account needed.
-- **Translate** on the device into the phone's language (models download once).
+- **Bilingual plaques**: the language is detected paragraph by paragraph, so a plaque in, say,
+  Portuguese and English reads each part with its own voice and translates each from its own
+  language. A guide's language can also be set by hand.
+- **Translate** on the device into the phone's language, or one chosen in Settings (models
+  download once).
 - **Scripts**: Latin, Chinese, Japanese, Korean and Devanagari, detected automatically.
 - **Improve with cloud** (optional): sends one photo to Google Cloud Vision for a second reading.
 

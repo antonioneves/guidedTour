@@ -105,6 +105,8 @@ import com.guidedtour.app.TourViewModel
 import com.guidedtour.app.data.OcrScript
 import com.guidedtour.app.data.PlayerState
 import com.guidedtour.app.data.paragraphsOf
+import com.guidedtour.app.data.pieces
+import com.guidedtour.app.data.Scan
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -476,6 +478,33 @@ private fun TranslationSection(viewModel: TourViewModel) {
     }
 }
 
+/**
+ * Corrects a guide's language: detect it again paragraph by paragraph (the default, which handles
+ * bilingual plaques), or set one language for the whole text. [onChoose] gets null for detecting.
+ */
+@Composable
+fun LanguageDialog(scan: Scan, onDismiss: () -> Unit, onChoose: (String?) -> Unit) {
+    val current = scan.languageTag?.let { Locale.forLanguageTag(it).language }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Language of this text") },
+        text = {
+            LazyColumn {
+                item {
+                    LanguageRow(
+                        "Detect automatically" + if (!scan.languageFixed) scan.languageLabel()?.let { " ($it)" }.orEmpty() else "",
+                        !scan.languageFixed,
+                    ) { onChoose(null); onDismiss() }
+                }
+                items(Translator.languages) { code ->
+                    LanguageRow(Translator.nameOf(code), scan.languageFixed && current == code) { onChoose(code); onDismiss() }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
 @Composable
 private fun LanguageRow(name: String, selected: Boolean, onClick: () -> Unit) {
     Row(
@@ -542,7 +571,7 @@ private fun VoiceSection(viewModel: TourViewModel) {
     val chosen by viewModel.settings.voices.collectAsStateWithLifecycle()
     val scans by viewModel.scans.collectAsStateWithLifecycle()
     val languages = remember(scans) {
-        (listOf(Locale.getDefault().language) + scans.mapNotNull { it.languageTag?.let { tag -> Locale.forLanguageTag(tag).language } })
+        (listOf(Locale.getDefault().language) + scans.flatMap { it.allLanguages() }.map { Locale.forLanguageTag(it).language })
             .filter { it.isNotBlank() }.distinct()
     }
     var selected by remember { mutableStateOf(languages.first()) }
@@ -561,8 +590,10 @@ private fun VoiceSection(viewModel: TourViewModel) {
     val voices = remember(ready, selected) { viewModel.voicesFor(selected) }
     val languageName = Locale.forLanguageTag(selected).displayLanguage
     val sample = remember(scans, selected) {
-        scans.firstOrNull { it.languageTag?.let { tag -> Locale.forLanguageTag(tag).language } == selected }
-            ?.text?.take(120)?.substringBeforeLast(' ', "")?.takeIf { it.isNotBlank() }
+        // A piece of a guide in this language (only that part of a bilingual one).
+        scans.firstNotNullOfOrNull { scan ->
+            pieces(scan.text, scan.spans()).firstOrNull { Locale.forLanguageTag(it.first).language == selected }?.second?.trim()
+        }?.take(120)?.substringBeforeLast(' ', "")?.takeIf { it.isNotBlank() }
             ?: "Hello, this is how I sound in $languageName."
     }
     when {

@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.outlined.Notes
@@ -108,6 +109,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings: () -> Unit) {
     val scans by viewModel.scans.collectAsStateWithLifecycle()
+    val loaded by viewModel.scansLoaded.collectAsStateWithLifecycle()
     val player by viewModel.player.collectAsStateWithLifecycle()
     val translating by viewModel.translating.collectAsStateWithLifecycle()
     val translateTo by viewModel.settings.translateTo.collectAsStateWithLifecycle()
@@ -178,7 +180,8 @@ fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings
         },
         snackbarHost = { SnackbarHost(snackbar, Modifier.padding(bottom = bottomInset)) },
     ) { padding ->
-        if (scans.isEmpty() && !processing) {
+        // "Nothing scanned yet" only once the guides have been read, never while they load.
+        if (scans.isEmpty() && !processing && loaded) {
             EmptyState(Modifier.padding(padding))
         } else {
             LazyColumn(
@@ -269,6 +272,7 @@ private fun ScanCard(
     var menu by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     var choosing by remember { mutableStateOf(false) }
+    var choosingLanguage by remember { mutableStateOf(false) }
     var confirmCloud by remember { mutableStateOf(false) }
     var viewing by remember { mutableStateOf(false) }
     if (viewing && scan.thumbnail != null) PhotoViewer(scan.thumbnail, onDismiss = { viewing = false })
@@ -327,6 +331,11 @@ private fun ScanCard(
                                 onClick = { menu = false; choosing = true },
                             )
                         }
+                        DropdownMenuItem(
+                            text = { Text("Language") },
+                            leadingIcon = { Icon(Icons.Filled.Language, null) },
+                            onClick = { menu = false; choosingLanguage = true },
+                        )
                         if (viewModel.cloudAvailable && scan.thumbnail != null) {
                             DropdownMenuItem(
                                 text = { Text("Improve with cloud") },
@@ -334,7 +343,7 @@ private fun ScanCard(
                                 onClick = { menu = false; confirmCloud = true },
                             )
                         }
-                        if (Translator.needsTranslation(scan.languageTag, target)) {
+                        if (Translator.needsTranslation(scan.allLanguages(), target)) {
                             DropdownMenuItem(
                                 text = { Text(if (scan.translationTag == target) "Translate again" else "Translate into ${Translator.nameOf(target)}") },
                                 leadingIcon = { Icon(Icons.Filled.Translate, null) },
@@ -394,6 +403,7 @@ private fun ScanCard(
     if (editing) EditTextDialog(scan.text, onDismiss = { editing = false }) { viewModel.editText(scan, it) }
     if (choosing) ChooseParagraphsDialog(scan.text, onDismiss = { choosing = false }) { viewModel.editText(scan, it) }
     if (confirmCloud) CloudConfirmDialog(onDismiss = { confirmCloud = false }) { viewModel.improveWithCloud(scan) }
+    if (choosingLanguage) LanguageDialog(scan, onDismiss = { choosingLanguage = false }) { viewModel.setLanguage(scan, it) }
 }
 
 @Composable
@@ -462,7 +472,7 @@ private fun ReadingCard(modifier: Modifier = Modifier) {
 private fun ListenButton(scan: Scan, player: PlayerState, translating: Boolean, target: String, viewModel: TourViewModel) {
     val current = player.current?.takeIf { it.id == scan.id }
     val playing = current != null && player.playing
-    val translatable = Translator.needsTranslation(scan.languageTag, target)
+    val translatable = Translator.needsTranslation(scan.allLanguages(), target)
     val hasTranslation = scan.translation != null
     var useTranslation by rememberSaveable(scan.id) { mutableStateOf(hasTranslation) }
     LaunchedEffect(scan.translation) { if (scan.translation != null) useTranslation = true }
@@ -477,12 +487,14 @@ private fun ListenButton(scan: Scan, player: PlayerState, translating: Boolean, 
         current != null -> "Resume"
         !hasTranslation && !translatable -> "Listen"
         useTranslation && hasTranslation -> "Listen · ${scan.translationTag?.let(Translator::nameOf) ?: "translation"}"
+        // A bilingual text's languages are already named beside the button.
+        scan.allLanguages().size > 1 -> "Listen · original"
         else -> "Listen · ${scan.languageLabel() ?: "original"}"
     }
     val content: @Composable RowScope.() -> Unit = {
         Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(ButtonDefaults.IconSize))
         Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-        Text(label)
+        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (playing) {
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Icon(Icons.Filled.GraphicEq, null, Modifier.size(ButtonDefaults.IconSize))

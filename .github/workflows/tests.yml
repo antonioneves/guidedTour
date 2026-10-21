@@ -80,7 +80,7 @@ jobs:
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb push testset/. /data/local/tmp/testset/
             adb shell am instrument -w com.guidedtour.app.test/androidx.test.runner.AndroidJUnitRunner | tee instrument.txt
-            adb logcat -d -s OCR_REPORT:I | tee ocr-report.txt
+            adb logcat -d -s OCR_REPORT:I LANGUAGE_REPORT:I | tee ocr-report.txt
             grep -q "^OK (" instrument.txt
 
       - uses: actions/upload-artifact@v7

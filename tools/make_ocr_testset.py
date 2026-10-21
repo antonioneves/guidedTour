@@ -35,6 +35,15 @@ TITLE = "THE ACROPOLIS OF ATHENS"
 COL1 = ["The citadel rose above the city", "and was a place of worship", "for more than a thousand years."]
 COL2 = ["Pericles led the great building", "programme that created the", "temples seen here today."]
 CREDIT = "Photo credit: Hellenic Ministry of Culture"
+# A bilingual plaque: the local language first, then English, as many museums do.
+BILINGUAL_PT = [
+    "O Partenon foi construído entre 447 e 432 a.C.",
+    "como templo dedicado à deusa Atena.",
+]
+BILINGUAL_EN = [
+    "The Parthenon was built between 447 and 432 BC",
+    "as a temple dedicated to the goddess Athena.",
+]
 NEIGHBOUR = ["Roman Athens", "Under Hadrian", "the city grew", "a new quarter", "with baths and", "a library."]
 
 
@@ -100,9 +109,17 @@ def main(out):
     draw_lines(img, NEIGHBOUR, (1450, 220), 42)
     cases["side_text"] = (img, truth)
 
+    img = canvas()
+    draw_lines(img, BILINGUAL_PT, (120, 260), 54)
+    draw_lines(img, BILINGUAL_EN, (120, 620), 54, fill=(70, 66, 62))
+    cases["bilingual"] = (img, " ".join(BILINGUAL_PT + BILINGUAL_EN))
+    # The languages each case should be detected in, in reading order (checked by the accuracy report).
+    languages = {name: "en" for name in cases} | {"bilingual": "pt,en"}
+
     for name, (image, text) in cases.items():
         image.save(out / f"{name}.jpg", quality=88)
         (out / f"{name}.txt").write_text(text + "\n")
+        (out / f"{name}.lang").write_text(languages[name] + "\n")
     print(f"wrote {len(cases)} cases to {out}")
 
 

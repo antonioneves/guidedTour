@@ -37,5 +37,7 @@ fun shortAge(now: Long, then: Long, locale: Locale = Locale.getDefault(), zone: 
 fun Scan.whenAndWhere(): String =
     DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(timestamp)) + " · " + placeLabel()
 
+/** The text's languages by name, e.g. "Portuguese + English" for a bilingual plaque. */
 fun Scan.languageLabel(): String? =
-    languageTag?.let { Locale.forLanguageTag(it).displayLanguage.takeIf { l -> l.isNotBlank() } }
+    allLanguages().mapNotNull { Locale.forLanguageTag(it).displayLanguage.takeIf { l -> l.isNotBlank() } }
+        .joinToString(" + ").ifEmpty { null }

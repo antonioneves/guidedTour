@@ -11,6 +11,7 @@ import java.util.Locale
  * Developer tool: measures OCR accuracy on your own photos. Put `name.jpg` (or .png) and `name.txt`
  * (the true text) pairs in the app's `testset` folder, e.g.
  * `adb push plaque1.jpg plaque1.txt /sdcard/Android/data/com.guidedtour.app/files/testset/`.
+ * An optional `name.lang` lists the languages expected in reading order (e.g. "pt,en"), to check detection.
  */
 object Accuracy {
     fun folder(context: Context): File = File(context.getExternalFilesDir(null), "testset").apply { mkdirs() }
@@ -23,18 +24,29 @@ object Accuracy {
         val report = StringBuilder()
         var basicTotal = 0.0
         var improvedTotal = 0.0
+        var languagesChecked = 0
+        var languagesRight = 0
         for (file in images) {
             val truth = File(dir, file.nameWithoutExtension + ".txt").readText()
             val bitmap = decode(file) ?: continue
             val basic = characterErrorRate(truth, Recognizer.read(bitmap, script, enhance = false).text)
-            val improved = characterErrorRate(truth, Recognizer.read(bitmap, script, enhance = true).text)
+            val reading = Recognizer.read(bitmap, script, enhance = true)
+            val improved = characterErrorRate(truth, reading.text)
             basicTotal += basic
             improvedTotal += improved
             report.appendLine("%-24s basic %5.1f%%   improved %5.1f%%".format(Locale.US, file.name.take(24), basic * 100, improved * 100))
+            File(dir, file.nameWithoutExtension + ".lang").takeIf { it.exists() }?.let { expectedFile ->
+                val expected = expectedFile.readText().trim().split(',').map { it.trim() }
+                val found = Recognizer.detectLanguages(reading.text).map { it.tag }
+                languagesChecked++
+                if (found == expected) languagesRight++
+                report.appendLine("%-24s languages %s (expected %s)%s".format(Locale.US, "", found.joinToString("+").ifEmpty { "unknown" }, expected.joinToString("+"), if (found == expected) "" else "  wrong"))
+            }
         }
         val n = images.size
         report.appendLine()
         report.appendLine("%d photos. Average character error: basic %.1f%%, improved %.1f%%".format(Locale.US, n, basicTotal / n * 100, improvedTotal / n * 100))
+        if (languagesChecked > 0) report.appendLine("Languages detected right: %d of %d".format(Locale.US, languagesRight, languagesChecked))
         report.toString().also { runCatching { File(dir, "report.txt").writeText(it) } }
     }
 

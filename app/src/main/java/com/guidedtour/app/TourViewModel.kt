@@ -17,6 +17,8 @@ import com.guidedtour.app.data.Settings
 import com.guidedtour.app.data.TextReader
 import com.guidedtour.app.data.Translator
 import com.guidedtour.app.ui.placeLabel
+import com.guidedtour.app.data.mainLanguage
+import com.guidedtour.app.data.encodeSpans
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -24,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -42,9 +45,11 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     private val reader = TextReader.get(app)
     val settings = Settings.get(app)
 
-    val scans: StateFlow<List<Scan>> =
-        // Loaded from the start, so Guides never opens on an empty list while the database is read.
-        dao.observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    // Loaded from the start, so Guides rarely opens before the database has been read; null until then.
+    private val loadedScans: StateFlow<List<Scan>?> = dao.observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val scans: StateFlow<List<Scan>> = loadedScans.map { it.orEmpty() }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    /** False until the database has been read once (slow the first time after an app update). */
+    val scansLoaded: StateFlow<Boolean> = loadedScans.map { it != null }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val player: StateFlow<PlayerState> = reader.state
 
     private val _state = MutableStateFlow<ScanState>(ScanState.Idle)
@@ -120,17 +125,18 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
             _state.value = ScanState.NoText
             return
         }
-        val language = Recognizer.detectLanguage(text)
         val location = locator.current()
-        val place = location?.let { locator.placeName(it.latitude, it.longitude) }
+        val spot = location?.let { locator.spot(it.latitude, it.longitude) }
+        val spans = Recognizer.detectLanguages(text, spot?.countryCode)
         val now = System.currentTimeMillis()
         val scan = Scan(
             text = text,
             timestamp = now,
             latitude = location?.latitude,
             longitude = location?.longitude,
-            placeName = place,
-            languageTag = language,
+            placeName = spot?.name,
+            languageTag = mainLanguage(text, spans),
+            languages = encodeSpans(spans),
             thumbnail = photo?.let { saveThumbnail(it, now) },
         )
         val saved = scan.copy(id = dao.insert(scan))
@@ -160,6 +166,8 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         title = placeLabel(),
         text = if (translated) translation.orEmpty() else text,
         languageTag = if (translated) translationTag else languageTag,
+        // A translation is all in one language; the original may switch language between paragraphs.
+        spans = if (translated) emptyList() else spans(),
     )
 
     private fun start() = ReaderService.start(app)
@@ -202,15 +210,39 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { dao.setFavorite(scan.id, !scan.favorite) }
     }
 
-    /** Fixes OCR mistakes. Clears any stale translation and re-detects the language. */
+    /**
+     * Fixes OCR mistakes. Clears any stale translation and detects the languages again, unless the
+     * user chose the language by hand.
+     */
     fun editText(scan: Scan, newText: String) {
         val text = newText.trim()
         if (text.isEmpty() || text == scan.text) return
         viewModelScope.launch {
-            val language = Recognizer.detectLanguage(text) ?: scan.languageTag
-            dao.updateText(scan.id, text, language)
+            val spans = if (scan.languageFixed) emptyList() else Recognizer.detectLanguages(text, scan.country())
+            val language = mainLanguage(text, spans) ?: scan.languageTag
+            val languages = encodeSpans(spans)
+            dao.updateText(scan.id, text, language, languages)
             (_state.value as? ScanState.Done)?.takeIf { it.scan.id == scan.id }?.let {
-                _state.value = ScanState.Done(it.scan.copy(text = text, languageTag = language, translation = null, translationTag = null))
+                _state.value = ScanState.Done(it.scan.copy(text = text, languageTag = language, languages = languages, translation = null, translationTag = null))
+            }
+        }
+    }
+
+    /** The country the scan was taken in, if it has a location, to tell close languages apart. */
+    private suspend fun Scan.country(): String? {
+        val lat = latitude ?: return null
+        val lng = longitude ?: return null
+        return locator.spot(lat, lng).countryCode
+    }
+
+    /** Sets the whole text's language by hand, or with null detects it again paragraph by paragraph. */
+    fun setLanguage(scan: Scan, language: String?) {
+        viewModelScope.launch {
+            if (language != null) {
+                dao.setLanguage(scan.id, language, null, fixed = true)
+            } else {
+                val spans = Recognizer.detectLanguages(scan.text, scan.country())
+                dao.setLanguage(scan.id, mainLanguage(scan.text, spans) ?: scan.languageTag, encodeSpans(spans), fixed = false)
             }
         }
     }
@@ -253,7 +285,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         _translating.value += scan.id
         viewModelScope.launch {
             val target = Translator.target(settings.translateTo.value)
-            when (val result = Translator.translate(scan.text, scan.languageTag, target)) {
+            when (val result = Translator.translate(scan.text, scan.spans(), target)) {
                 is Translator.Result.Success -> {
                     dao.setTranslation(scan.id, result.text, target)
                     val withTranslation = scan.copy(translation = result.text, translationTag = target)
