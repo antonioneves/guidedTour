@@ -7,7 +7,7 @@ import kotlin.math.min
 /**
  * One recognised line with its upright pixel box, ML Kit's confidence, its tilt in degrees, its words
  * with their confidence, and its [corners] as the text reads (x, y of the top-left, top-right,
- * bottom-right and bottom-left), which follow the line when it slants.
+ * bottom-right and bottom-left), which follow the line when it slants, and where each word is.
  */
 data class OcrLine(
     val text: String,
@@ -16,6 +16,8 @@ data class OcrLine(
     val angle: Float = 0f,
     val words: List<Pair<String, Float>> = emptyList(),
     val corners: List<Float> = emptyList(),
+    /** Each of [words]' left and right edge, when known. */
+    val wordBoxes: List<Pair<Int, Int>> = emptyList(),
 ) {
     /** The upright box's height: for a slanted line, more than its letters. */
     val height: Int get() = bottom - top
@@ -120,7 +122,7 @@ fun dropIntruders(blocks: List<OcrBlock>, width: Int, height: Int): List<OcrBloc
     return groups.filterIndexed { i, _ -> scores[i] >= best * 0.5 }.flatten().sortedBy { blocks.indexOf(it) }
 }
 
-private fun groupsOf(blocks: List<OcrBlock>): List<List<OcrBlock>> {
+internal fun groupsOf(blocks: List<OcrBlock>): List<List<OcrBlock>> {
     val parent = IntArray(blocks.size) { it }
     fun root(i: Int): Int = if (parent[i] == i) i else root(parent[i]).also { parent[i] = it }
     for (i in blocks.indices) for (j in i + 1 until blocks.size) {
@@ -183,10 +185,11 @@ private fun mainTextSize(blocks: List<OcrBlock>): Int {
 
 /**
  * Ordered, de-noised text with one blank line between paragraphs. With the photo's [width] and
- * [height], text from neighbouring plaques is dropped too.
+ * [height], text from neighbouring plaques is dropped too. Without [filter], every block is kept
+ * (the user picked what to read).
  */
-fun layoutText(blocks: List<OcrBlock>, width: Int = 0, height: Int = 0): String =
-    orderBlocks(dropNoise(dropIntruders(blocks, width, height)))
+fun layoutText(blocks: List<OcrBlock>, width: Int = 0, height: Int = 0, filter: Boolean = true): String =
+    orderBlocks(if (filter) dropNoise(dropIntruders(blocks, width, height)) else blocks)
         .map { fixConfusables(it.text) }
         .filter { it.isNotBlank() }
         .joinToString("\n\n")
@@ -210,7 +213,9 @@ fun paragraphsOf(text: String): List<String> = text.split(Regex("\n\\s*\n")).map
 data class ViewArea(val left: Float, val top: Float, val right: Float, val bottom: Float, val viewWidth: Int, val viewHeight: Int)
 
 /** Part of a photo, as fractions of its width and height. */
-data class PhotoRegion(val left: Float, val top: Float, val right: Float, val bottom: Float)
+data class PhotoRegion(val left: Float, val top: Float, val right: Float, val bottom: Float) {
+    fun overlaps(other: PhotoRegion) = left < other.right && other.left < right && top < other.bottom && other.top < bottom
+}
 
 /**
  * Where [area] falls in a photo [width] × [height] that the preview showed filling and centred, its

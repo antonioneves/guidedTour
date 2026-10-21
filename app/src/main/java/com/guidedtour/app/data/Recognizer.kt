@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import androidx.camera.core.ImageProxy
 import androidx.core.graphics.createBitmap
+import androidx.core.graphics.get
 import androidx.core.graphics.scale
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.vision.common.InputImage
@@ -37,12 +38,13 @@ class Reading(val text: String, val confidence: Float, val letters: Int, val tur
     val isEmpty: Boolean get() = text.isBlank()
 }
 
-private class Pass(val script: OcrScript, val blocks: List<OcrBlock>, val width: Int, val height: Int) {
+/** One ML Kit reading of an image. Without [filter], all its text counts (the user picked what to read). */
+private class Pass(val script: OcrScript, val blocks: List<OcrBlock>, val width: Int, val height: Int, val filter: Boolean = true) {
     /** The blocks that belong to the aimed-at text, without neighbouring plaques. */
-    val kept: List<OcrBlock> get() = dropIntruders(blocks, width, height)
+    val kept: List<OcrBlock> get() = if (filter) dropIntruders(blocks, width, height) else blocks
     val reading: Reading
         get() {
-            val text = layoutText(blocks, width, height)
+            val text = layoutText(blocks, width, height, filter)
             val kept = kept
             return Reading(text, meanConfidence(kept), text.count { it.isLetterOrDigit() }, unsure = unsureWords(kept))
         }
@@ -104,15 +106,46 @@ object Recognizer {
      * no time spent on the rest), and a second pass straightens it, enlarges small letters and boosts
      * contrast. Whichever reading looks more reliable wins.
      */
-    suspend fun read(photo: Bitmap, script: OcrScript, enhance: Boolean = true, region: PhotoRegion? = null): Reading {
-        if (region == null) return readAll(photo, script, enhance)
-        // Only the text block that was aimed at: text around it is left out from the start.
-        val aimed = withContext(Dispatchers.Default) { cropped(photo, region) }
+    suspend fun read(
+        photo: Bitmap,
+        script: OcrScript,
+        enhance: Boolean = true,
+        region: PhotoRegion? = null,
+        skipped: List<PhotoRegion> = emptyList(),
+        chosen: Boolean = false,
+    ): Reading {
+        if (region == null && skipped.isEmpty()) return readAll(photo, script, enhance, !chosen)
+        // Only the text that was aimed at: text around it is left out from the start, and text
+        // inside that the user skipped is blanked out.
+        val aimed = withContext(Dispatchers.Default) { masked(cropped(photo, region ?: PhotoRegion(0f, 0f, 1f, 1f)), photo, region, skipped) }
         return try {
-            readAll(aimed, script, enhance)
+            readAll(aimed, script, enhance, !chosen)
         } finally {
             if (aimed !== photo) aimed.recycle()
         }
+    }
+
+    /**
+     * [crop] (the [region] of [photo]) with the [skipped] parts of [photo] painted over in the colour
+     * just outside each, so no text is read there.
+     */
+    private fun masked(crop: Bitmap, photo: Bitmap, region: PhotoRegion?, skipped: List<PhotoRegion>): Bitmap {
+        if (skipped.isEmpty()) return crop
+        val out = crop.copy(Bitmap.Config.ARGB_8888, true)
+        if (crop !== photo) crop.recycle()
+        val r = region ?: PhotoRegion(0f, 0f, 1f, 1f)
+        val canvas = Canvas(out)
+        val paint = Paint()
+        for (part in skipped) {
+            val left = ((part.left - r.left) / (r.right - r.left) * out.width).coerceIn(0f, out.width.toFloat())
+            val top = ((part.top - r.top) / (r.bottom - r.top) * out.height).coerceIn(0f, out.height.toFloat())
+            val right = ((part.right - r.left) / (r.right - r.left) * out.width).coerceIn(0f, out.width.toFloat())
+            val bottom = ((part.bottom - r.top) / (r.bottom - r.top) * out.height).coerceIn(0f, out.height.toFloat())
+            if (right - left < 1 || bottom - top < 1) continue
+            paint.color = out[max(0, left.toInt() - 2).coerceAtMost(out.width - 1), max(0, top.toInt() - 2).coerceAtMost(out.height - 1)]
+            canvas.drawRect(left, top, right, bottom, paint)
+        }
+        return out
     }
 
     /** The [region] of [photo]; [photo] itself if that's all of it. */
@@ -124,17 +157,17 @@ object Recognizer {
         return Bitmap.createBitmap(photo, left, top, right - left, bottom - top)
     }
 
-    private suspend fun readAll(photo: Bitmap, script: OcrScript, enhance: Boolean): Reading {
+    private suspend fun readAll(photo: Bitmap, script: OcrScript, enhance: Boolean, filter: Boolean = true): Reading {
         val overview = withContext(Dispatchers.Default) { shrunk(photo, OVERVIEW_SIDE) }
         var source = overview
         var turn = 0
-        var first = firstPass(overview, script)
+        var first = firstPass(overview, script, filter)
         // Sideways text (the phone turned while the screen stayed upright, or a plaque mounted on its
         // side) reads poorly: if this one did, try a quarter turn each way and keep the best.
         if (enhance && (looksSideways(first.blocks) || looksWeak(first.reading))) {
             for (degrees in listOf(90, 270)) {
                 val turned = withContext(Dispatchers.Default) { rotated(overview, degrees.toFloat()) }
-                val pass = firstPass(turned, script)
+                val pass = firstPass(turned, script, filter)
                 // ML Kit reads sideways text too, so a turn only wins if it lays the lines down flat.
                 if (!looksSideways(pass.blocks) && isBetter(pass.reading, first.reading)) {
                     if (source !== overview) source.recycle()
@@ -153,7 +186,7 @@ object Recognizer {
                 val scale = max(photo.width, photo.height).toFloat() / max(overview.width, overview.height)
                 // Around all the text seen, not just the main plaque's: the pass on the detail sorts that out again.
                 val detail = withContext(Dispatchers.Default) { textArea(photo, turn, first.blocks, scale) }
-                val pass = Pass(first.script, recognize(client(first.script), detail), detail.width, detail.height)
+                val pass = Pass(first.script, recognize(client(first.script), detail), detail.width, detail.height, filter)
                 if (pass.kept.isNotEmpty() && pass.reading.letters >= first.reading.letters * 0.9) {
                     if (source !== overview && source !== photo) source.recycle()
                     source = detail
@@ -165,7 +198,7 @@ object Recognizer {
             }
             // Straighten or crop around the kept text only, so neighbouring plaques fall outside.
             val improved = withContext(Dispatchers.Default) { enhanced(source, first.kept) }
-            val second = Pass(first.script, recognize(client(first.script), improved), improved.width, improved.height).reading
+            val second = Pass(first.script, recognize(client(first.script), improved), improved.width, improved.height, filter).reading
             improved.recycle()
             if (isBetter(second, best)) best = second
         }
@@ -216,18 +249,18 @@ object Recognizer {
         (candidate.letters >= current.letters * 0.9 && candidate.confidence >= current.confidence) ||
             (candidate.letters > current.letters * 1.1 && candidate.confidence >= current.confidence * 0.95)
 
-    private suspend fun firstPass(bitmap: Bitmap, script: OcrScript): Pass {
-        if (script != OcrScript.Auto) return pass(script, bitmap)
+    private suspend fun firstPass(bitmap: Bitmap, script: OcrScript, filter: Boolean = true): Pass {
+        if (script != OcrScript.Auto) return pass(script, bitmap, filter)
         // Latin first; only if it finds next to nothing do we try the other scripts.
-        val latin = pass(OcrScript.Latin, bitmap)
+        val latin = pass(OcrScript.Latin, bitmap, filter)
         if (latin.reading.letters >= 12) return latin
         val others = OcrScript.entries.filter { it != OcrScript.Auto && it != OcrScript.Latin }
-            .map { pass(it, bitmap) }
+            .map { pass(it, bitmap, filter) }
         return (listOf(latin) + others).maxBy { it.reading.letters }
     }
 
-    private suspend fun pass(script: OcrScript, bitmap: Bitmap) =
-        Pass(script, recognize(client(script), bitmap), bitmap.width, bitmap.height)
+    private suspend fun pass(script: OcrScript, bitmap: Bitmap, filter: Boolean = true) =
+        Pass(script, recognize(client(script), bitmap), bitmap.width, bitmap.height, filter)
 
     private suspend fun recognize(recognizer: TextRecognizer, bitmap: Bitmap): List<OcrBlock> =
         suspendCancellableCoroutine { cont ->
@@ -239,6 +272,7 @@ object Recognizer {
                                 line.text, it.left, it.top, it.right, it.bottom, line.confidence, line.angle,
                                 line.elements.map { e -> e.text to e.confidence },
                                 line.cornerPoints?.takeIf { c -> c.size == 4 }?.flatMap { c -> listOf(c.x.toFloat(), c.y.toFloat()) }.orEmpty(),
+                                line.elements.map { e -> (e.boundingBox?.left ?: it.left) to (e.boundingBox?.right ?: it.right) },
                             ) }
                         }
                         if (lines.isEmpty()) null else OcrBlock(lines)

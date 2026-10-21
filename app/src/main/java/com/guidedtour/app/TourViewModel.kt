@@ -11,6 +11,7 @@ import com.guidedtour.app.data.AppDatabase
 import com.guidedtour.app.data.Accuracy
 import com.guidedtour.app.data.CloudOcr
 import com.guidedtour.app.data.WordLists
+import com.guidedtour.app.data.PhotoRegion
 import com.guidedtour.app.data.ViewArea
 import com.guidedtour.app.data.photoRegion
 import com.guidedtour.app.data.readPickedPhoto
@@ -133,12 +134,12 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Reads the sharpest photo, only inside [aimed] (the text block outlined in the preview) if given,
-     * or else only what the preview showed ([shown], the whole preview); if that finds nothing, falls
-     * back to [liveText] seen in the preview. The photo is saved as the preview showed it: the camera
-     * takes in more at the sides (or top and bottom) than a phone screen shows.
+     * Reads the sharpest photo: only what the preview showed ([shown], the whole preview), and within
+     * it only the [aimed] text frames if there are any, with the [skipped] ones blanked out; if that
+     * finds nothing, falls back to [liveText] seen in the preview. The photo is saved as the preview
+     * showed it: the camera takes in more at the sides (or top and bottom) than a phone screen shows.
      */
-    fun finishCapture(liveText: String, aimed: ViewArea? = null, shown: ViewArea? = null) {
+    fun finishCapture(liveText: String, aimed: List<ViewArea> = emptyList(), skipped: List<ViewArea> = emptyList(), shown: ViewArea? = null) {
         val taken = bestFrame
         bestFrame = null
         bestSharpness = -1.0
@@ -148,10 +149,17 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
             } else {
                 val visible = shown?.let { photoRegion(it, taken.width, taken.height, margin = 0f) }
                 val frame = if (visible == null) taken else withContext(Dispatchers.Default) { Recognizer.cropped(taken, visible) }
-                // Only the text block that was outlined in the preview (cropped like the preview, the
-                // photo now matches it exactly).
-                val region = aimed?.let { photoRegion(it, frame.width, frame.height) }
-                val reading = Recognizer.read(frame, settings.script.value, region = region)
+                // Only the frames to read (cropped like the preview, the photo now matches it exactly);
+                // skipped frames between them are blanked out, unless they overlap one to read.
+                val read = aimed.mapNotNull { photoRegion(it, frame.width, frame.height) }
+                val exact = aimed.mapNotNull { photoRegion(it, frame.width, frame.height, margin = 0f) }
+                val skip = skipped.mapNotNull { photoRegion(it, frame.width, frame.height, margin = 0.05f) }
+                    .filter { s -> exact.none { it.overlaps(s) } }
+                val region = read.takeIf { it.isNotEmpty() }?.let { r ->
+                    PhotoRegion(r.minOf { it.left }, r.minOf { it.top }, r.maxOf { it.right }, r.maxOf { it.bottom })
+                }
+                val chosen = aimed.isNotEmpty() || skipped.isNotEmpty()
+                val reading = Recognizer.read(frame, settings.script.value, region = region, skipped = skip, chosen = chosen)
                 // Save the photo the way the text reads, if it had to be turned.
                 val photo = if (reading.turn == 0) frame else withContext(Dispatchers.Default) {
                     Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, android.graphics.Matrix().apply { postRotate(reading.turn.toFloat()) }, true)

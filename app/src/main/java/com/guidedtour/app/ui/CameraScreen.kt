@@ -34,9 +34,6 @@ import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateRectAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -106,6 +103,7 @@ import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -132,11 +130,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.guidedtour.app.ScanState
 import com.guidedtour.app.TourViewModel
+import com.guidedtour.app.data.FrameTracker
 import com.guidedtour.app.data.OcrBlock
 import com.guidedtour.app.data.OcrLine
 import com.guidedtour.app.data.Recognizer
 import com.guidedtour.app.data.ViewArea
-import com.guidedtour.app.data.dropIntruders
+import com.guidedtour.app.data.textFrames
 import com.guidedtour.app.data.orderBlocks
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
@@ -311,6 +310,9 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
     val scope = rememberCoroutineScope()
 
     var frame by remember { mutableStateOf(EMPTY_FRAME) }
+    // The text in view as frames: the ones to read and the ones skipped, kept steady between preview frames.
+    val tracker = remember { FrameTracker() }
+    var frames by remember { mutableStateOf<List<ShownFrame>>(emptyList()) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
     val steady by rememberSteady(active = visible)
     val tip = evaluate(frame, viewSize.width, viewSize.height, steady)
@@ -419,17 +421,27 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         ) { result ->
             val text = result.getValue(recognizer)
             frame = if (text == null) {
+                frames = tracker.update(emptyList()).map(::ShownFrame)
                 LiveFrame("", emptyList(), brightness, glare)
             } else {
-                // Only the text block aimed at (the main plaque, not bits of text around it), as the
-                // photo will be read; tips, focus and capture all go by it.
+                // The text as frames (columns, headings, notes aside); only the included ones count for
+                // tips, focus and capture, as only they will be read.
                 val blocks = text.textBlocks.mapNotNull { block ->
                     val lines = block.lines.mapNotNull { line ->
-                        line.boundingBox?.let { OcrLine(line.text, it.left, it.top, it.right, it.bottom, line.confidence) }
+                        line.boundingBox?.let {
+                            OcrLine(
+                                line.text, it.left, it.top, it.right, it.bottom, line.confidence,
+                                words = line.elements.map { e -> e.text to e.confidence },
+                                wordBoxes = line.elements.map { e -> (e.boundingBox?.left ?: it.left) to (e.boundingBox?.right ?: it.right) },
+                            )
+                        }
                     }
                     if (lines.isEmpty()) null else OcrBlock(lines)
                 }
-                val main = orderBlocks(dropIntruders(blocks, viewSize.width, viewSize.height))
+                val tracked = tracker.update(textFrames(blocks, viewSize.width, viewSize.height))
+                frames = tracked.map(::ShownFrame)
+                val included = tracked.filter { it.shown && it.included }
+                val main = orderBlocks(included.flatMap { it.frame.blocks })
                 val lines = main.flatMap { it.lines }.map { LineBox(it.left, it.top, it.right, it.bottom, it.confidence) }
                 LiveFrame(main.joinToString("\n\n") { it.text }, lines, brightness, glare)
             }
@@ -475,7 +487,9 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         armed = false
         val liveText = frame.text
         val textLines = frame.lines
-        val aimed = textArea(textLines)?.let { ViewArea(it.left, it.top, it.right, it.bottom, viewSize.width, viewSize.height) }
+        fun area(f: ShownFrame) = ViewArea(f.left, f.top, f.right, f.bottom, viewSize.width, viewSize.height)
+        val aimed = frames.filter { it.shown && it.included }.map(::area)
+        val skipped = frames.filter { it.shown && !it.included }.map(::area)
         // Night mode already merges several frames into each photo, slowly: one is enough.
         val photos = if (careful && !nightOn) CAREFUL_PHOTOS else 1
         // The frame on screen at the tap shrinks into a card straight away, while the photos are
@@ -495,7 +509,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                 Log.i(TAG, "capture: photo ${i + 1} ${if (image != null) "taken" else "failed"} at ${SystemClock.elapsedRealtime() - tapped} ms")
                 if (image != null) viewModel.addFrame(image)
             }
-            viewModel.finishCapture(liveText, aimed, ViewArea(0f, 0f, viewSize.width.toFloat(), viewSize.height.toFloat(), viewSize.width, viewSize.height))
+            viewModel.finishCapture(liveText, aimed, skipped, ViewArea(0f, 0f, viewSize.width.toFloat(), viewSize.height.toFloat(), viewSize.width, viewSize.height))
             // Keep "Hold still…" up for a moment even when the photos were quick, so it can be read.
             delay((MIN_HOLD_STILL_MS - (SystemClock.elapsedRealtime() - tapped)).coerceAtLeast(0))
             photosTaken = true
@@ -549,6 +563,29 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                     previewView = it
                     it.controller = controller
                     controller.bindToLifecycle(lifecycleOwner)
+                    // A tap on a frame includes or skips it; anywhere else it focuses, as before.
+                    val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
+                    val pad = 12 * ctx.resources.displayMetrics.density
+                    var downX = 0f
+                    var downY = 0f
+                    var downAt = 0L
+                    it.setOnTouchListener { view, event ->
+                        when (event.actionMasked) {
+                            android.view.MotionEvent.ACTION_DOWN -> { downX = event.x; downY = event.y; downAt = event.eventTime; false }
+                            android.view.MotionEvent.ACTION_UP -> {
+                                val tap = event.eventTime - downAt < 300 && abs(event.x - downX) < slop && abs(event.y - downY) < slop
+                                if (tap && tracker.toggleAt(event.x, event.y, pad)) {
+                                    frames = tracker.frames.map(::ShownFrame)
+                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+                                    view.performClick()
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            else -> false
+                        }
+                    }
                 }
             },
         )
@@ -565,23 +602,29 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             )
         }
 
-        // The text block that will be read, framed, with the rest of the view dimmed: green when
-        // readable, amber otherwise. It glides as the phone moves rather than jumping between frames.
-        // Hidden while processing, as it would no longer match the shrinking photo.
+        // The text as frames: the ones that will be read in green (amber while not yet readable), with
+        // the rest of the view dimmed; skipped ones (a note aside, a neighbouring label) dashed, to
+        // tap if they should be read too. Hidden while processing, as they'd no longer match the photo.
         val outline = if (tip.ok) ScanGreen else ScanAmber
-        val area = textArea(frame.lines)
-        var lastArea by remember { mutableStateOf(Rect.Zero) }
-        if (area != null) lastArea = area
-        val shownArea by animateRectAsState(lastArea, spring(stiffness = Spring.StiffnessMediumLow), label = "text block")
-        val areaAlpha by animateFloatAsState(if (area != null && !processing) 1f else 0f, label = "text block alpha")
-        if (areaAlpha > 0f) Canvas(Modifier.fillMaxSize()) {
+        val shown = frames.filter { it.shown }
+        val framesAlpha by animateFloatAsState(if (shown.isNotEmpty() && !processing) 1f else 0f, label = "frames")
+        if (framesAlpha > 0f) Canvas(Modifier.fillMaxSize()) {
             val pad = 12.dp.toPx()
-            val box = Rect(shownArea.left - pad, shownArea.top - pad, shownArea.right + pad, shownArea.bottom + pad)
             val corner = CornerRadius(16.dp.toPx())
-            val frameShape = Path().apply { addRoundRect(androidx.compose.ui.geometry.RoundRect(box, corner)) }
-            clipPath(frameShape, ClipOp.Difference) { drawRect(Color.Black.copy(alpha = 0.35f * areaAlpha)) }
-            drawRoundRect(outline.copy(alpha = 0.12f * areaAlpha), box.topLeft, box.size, corner)
-            drawRoundRect(outline.copy(alpha = areaAlpha), box.topLeft, box.size, corner, Stroke(width = 3.dp.toPx()))
+            fun box(f: ShownFrame) = Rect(f.left - pad, f.top - pad, f.right + pad, f.bottom + pad)
+            val read = shown.filter { it.included }
+            val cutOut = Path().apply { read.forEach { addRoundRect(androidx.compose.ui.geometry.RoundRect(box(it), corner)) } }
+            clipPath(cutOut, ClipOp.Difference) { drawRect(Color.Black.copy(alpha = 0.35f * framesAlpha)) }
+            read.forEach {
+                val b = box(it)
+                drawRoundRect(outline.copy(alpha = 0.12f * framesAlpha), b.topLeft, b.size, corner)
+                drawRoundRect(outline.copy(alpha = framesAlpha), b.topLeft, b.size, corner, Stroke(width = 3.dp.toPx()))
+            }
+            val dashes = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 6.dp.toPx()))
+            shown.filter { !it.included }.forEach {
+                val b = box(it)
+                drawRoundRect(Color.White.copy(alpha = 0.7f * framesAlpha), b.topLeft, b.size, corner, Stroke(width = 1.5.dp.toPx(), pathEffect = dashes))
+            }
         }
 
         // The tips sit at whichever edge is "up" for the person holding the phone, turned to read upright.
@@ -785,11 +828,15 @@ private fun CameraToggle(checked: Boolean, onToggle: () -> Unit, icon: ImageVect
     ) { Icon(icon, label, Modifier.rotate(iconAngle)) }
 }
 
-/** The box around [lines], in the preview's pixels, or null without any. */
-private fun textArea(lines: List<LineBox>): Rect? = if (lines.isEmpty()) null else Rect(
-    lines.minOf { it.left }.toFloat(), lines.minOf { it.top }.toFloat(),
-    lines.maxOf { it.right }.toFloat(), lines.maxOf { it.bottom }.toFloat(),
-)
+/** A tracked frame as drawn: a snapshot, so Compose sees each change. */
+private class ShownFrame(t: FrameTracker.Tracked) {
+    val left = t.left
+    val top = t.top
+    val right = t.right
+    val bottom = t.bottom
+    val included = t.included
+    val shown = t.shown
+}
 
 /** What identifies a lens across recompositions and restarts. */
 private fun key(lens: Lens) = (if (lens.front) "front " else "back ") + lens.label

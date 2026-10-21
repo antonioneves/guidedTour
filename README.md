@@ -8,8 +8,10 @@ scanned, and reads it aloud, also with the screen off.
 
 - **Scan**: live text recognition with tips for a better photo (too dark, too small, cut off,
   shaky, glare). Text photographed at an angle, from the side or below, is stretched back square,
-  and sideways or tilted text is turned upright. The text block aimed at is framed live, and only
-  what's inside it is read, so labels and signs around it are left out. The camera focuses on the text, and photos are
+  and sideways or tilted text is turned upright. The text in view is framed live, a frame per
+  column, heading or note: the plaque aimed at in green, read in reading order, and notes or
+  labels around it dashed and skipped. Tap a frame to include or skip it; only the included
+  frames are read. The camera focuses on the text, and photos are
   read at full resolution (only the text area, found first on a smaller copy). Lens chips switch
   between the phone's cameras (ultra-wide, main, 2×, front), and night mode where the phone offers
   it. Capture with the shutter button or the volume key, or let it capture
