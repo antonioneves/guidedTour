@@ -1,6 +1,7 @@
 package com.guidedtour.app
 
 import android.app.Application
+import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.camera.core.ImageProxy
@@ -10,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.guidedtour.app.data.AppDatabase
 import com.guidedtour.app.data.Accuracy
 import com.guidedtour.app.data.AiProofreader
+import com.guidedtour.app.data.Backup
 import com.guidedtour.app.data.CloudOcr
 import com.guidedtour.app.data.Headliner
 import com.guidedtour.app.data.printedTitle
@@ -37,6 +39,11 @@ import com.guidedtour.app.data.mainLanguage
 import com.guidedtour.app.data.encodeSpans
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
@@ -122,6 +129,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         }
         // Off the main thread: reaching AICore can block, above all on phones without it.
         viewModelScope.launch(Dispatchers.Default) { writeHeadlines() }
+        viewModelScope.launch { keepBackedUp() }
     }
 
     /**
@@ -510,7 +518,101 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
             _translating.value -= scan.id
         }
     }
+
+    // ---- Backup ----
+
+    /** True while a backup is being written or read. */
+    private val _backingUp = MutableStateFlow(false)
+    val backingUp: StateFlow<Boolean> = _backingUp
+    private val backupLock = Mutex()
+
+    /** Writes every guide, its photo and the personal words to [uri], a file the user chose. */
+    fun exportTo(uri: Uri) {
+        viewModelScope.launch {
+            val ok = writeBackup(uri)
+            _messages.tryEmit(if (ok) "Guides exported" else "Couldn't export the guides")
+        }
+    }
+
+    /** Adds the guides of the backup at [uri] that aren't in the app yet; nothing is removed or replaced. */
+    fun importFrom(uri: Uri) {
+        viewModelScope.launch {
+            val contents = backupLock.withLock {
+                _backingUp.value = true
+                try {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            val have = dao.all().map { it.timestamp }.toSet()
+                            val photos = File(app.filesDir, "thumbs").apply { mkdirs() }
+                            val contents = app.contentResolver.openInputStream(uri)!!.use { Backup.read(it, photos) { time -> time in have } }
+                            dao.insertAll(contents.fresh)
+                            personalWords.addAll(contents.words)
+                            contents
+                        }.onFailure { android.util.Log.w("GuidedTour", "backup: can't import", it) }.getOrNull()
+                    }
+                } finally {
+                    _backingUp.value = false
+                }
+            }
+            _messages.tryEmit(
+                when {
+                    contents == null -> "That file isn't a Guided Tour backup"
+                    contents.fresh.isEmpty() -> "Every guide in that backup is already here"
+                    else -> "Added ${contents.fresh.size} " + (if (contents.fresh.size == 1) "guide" else "guides") +
+                        (if (contents.skipped > 0) " (${contents.skipped} already here)" else "")
+                },
+            )
+        }
+    }
+
+    /**
+     * Keeps [uri] (a file the user chose, e.g. in Google Drive) up to date as a backup, written now and
+     * after each change; null stops it. Restoring stays the user's choice (see [importFrom]).
+     */
+    fun setAutoBackup(uri: Uri?) {
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        settings.backupFile.value?.let { old -> runCatching { app.contentResolver.releasePersistableUriPermission(Uri.parse(old), flags) } }
+        if (uri != null && runCatching { app.contentResolver.takePersistableUriPermission(uri, flags) }.isFailure) {
+            _messages.tryEmit("Can't keep a backup in that place: choose another")
+            settings.setBackupFile(null)
+            return
+        }
+        settings.setBackupFile(uri?.toString())
+    }
+
+    /** Writes the automatic backup a little after the guides change, when they differ from the last one. */
+    private suspend fun keepBackedUp() {
+        combine(loadedScans.filterNotNull(), settings.backupFile) { scans, file -> scans to file }.collectLatest { (scans, file) ->
+            if (file == null) return@collectLatest
+            val signature = scans.hashCode()
+            if (signature == settings.backedUp) return@collectLatest
+            // A burst of changes (a scan, its headline, its translation) is written once.
+            if (settings.lastBackup.value != 0L) delay(BACKUP_DELAY_MS)
+            // Once begun, a write finishes, so a change meanwhile can't leave half a file.
+            withContext(NonCancellable) {
+                if (writeBackup(Uri.parse(file))) settings.setBackedUp(signature, System.currentTimeMillis())
+                else _messages.tryEmit("Automatic backup failed: choose the backup file again in Settings")
+            }
+        }
+    }
+
+    private suspend fun writeBackup(uri: Uri): Boolean = backupLock.withLock {
+        _backingUp.value = true
+        try {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val scans = dao.all()
+                    app.contentResolver.openOutputStream(uri, "wt")!!.use { Backup.write(scans, personalWords.words, it) }
+                }.onFailure { android.util.Log.w("GuidedTour", "backup: can't write", it) }.isSuccess
+            }
+        } finally {
+            _backingUp.value = false
+        }
+    }
 }
+
+/** How long after a change the automatic backup waits, so a burst of changes is written once. */
+private const val BACKUP_DELAY_MS = 30_000L
 
 /** How far the player's back and forward buttons jump. */
 const val SEEK_SECONDS = 10

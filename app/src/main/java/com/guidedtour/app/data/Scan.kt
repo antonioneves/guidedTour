@@ -49,8 +49,14 @@ interface ScanDao {
     @Query("SELECT * FROM scans ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<Scan>>
 
+    @Query("SELECT * FROM scans ORDER BY timestamp")
+    suspend fun all(): List<Scan>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(scan: Scan): Long
+
+    @Insert
+    suspend fun insertAll(scans: List<Scan>)
 
     @Query("DELETE FROM scans WHERE id = :id")
     suspend fun delete(id: Long)

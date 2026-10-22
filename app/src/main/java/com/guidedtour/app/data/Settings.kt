@@ -59,6 +59,26 @@ class Settings private constructor(context: Context) {
     )
     val voices: StateFlow<Map<String, String>> = _voices
 
+    private val _backupFile = MutableStateFlow(prefs.getString("backupFile", null))
+    /** The file (a document the user chose, e.g. in Google Drive) kept up to date as a backup; null when off. */
+    val backupFile: StateFlow<String?> = _backupFile
+    private val _lastBackup = MutableStateFlow(prefs.getLong("lastBackup", 0L))
+    /** When [backupFile] was last written; 0 if never. */
+    val lastBackup: StateFlow<Long> = _lastBackup
+    /** What the guides looked like at the last backup (see TourViewModel), so an unchanged set isn't written again. */
+    val backedUp: Int get() = prefs.getInt("backedUp", 0)
+
+    fun setBackupFile(uri: String?) {
+        _backupFile.value = uri
+        _lastBackup.value = 0L
+        prefs.edit().putString("backupFile", uri).putInt("backedUp", 0).putLong("lastBackup", 0L).apply()
+    }
+
+    fun setBackedUp(signature: Int, time: Long) {
+        _lastBackup.value = time
+        prefs.edit().putInt("backedUp", signature).putLong("lastBackup", time).apply()
+    }
+
     fun setVoice(language: String, voiceName: String?) {
         _voices.value = if (voiceName == null) _voices.value - language else _voices.value + (language to voiceName)
         prefs.edit().apply { if (voiceName == null) remove("voice.$language") else putString("voice.$language", voiceName) }.apply()

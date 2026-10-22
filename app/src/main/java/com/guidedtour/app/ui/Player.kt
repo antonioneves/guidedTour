@@ -32,6 +32,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
@@ -60,7 +61,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -660,6 +663,8 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
                 careful, settings::setCarefulCapture,
             )
 
+            DataSection(viewModel)
+
             Row(
                 Modifier.fillMaxWidth().clickable { showCredits = true }.padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -692,6 +697,53 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * The guides as a file: export a copy, import one (adding the guides not here yet), and keep a
+ * backup file up to date by itself. Any place the phone's file picker offers works, Google Drive
+ * included, which makes it a cloud backup.
+ */
+@Composable
+private fun DataSection(viewModel: TourViewModel) {
+    val settings = viewModel.settings
+    val backupFile by settings.backupFile.collectAsStateWithLifecycle()
+    val lastBackup by settings.lastBackup.collectAsStateWithLifecycle()
+    val busy by viewModel.backingUp.collectAsStateWithLifecycle()
+    val name = "Guided Tour backup ${java.time.LocalDate.now()}.zip"
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri -> uri?.let(viewModel::exportTo) }
+    val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(viewModel::importFrom) }
+    val keep = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri -> uri?.let(viewModel::setAutoBackup) }
+
+    Text("Your guides", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp).semantics { heading() })
+    Text(
+        "Keep a copy of every guide and its photo, on the phone or in Google Drive or another cloud. Importing adds the guides that aren't here yet and never removes any.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        androidx.compose.material3.OutlinedButton(onClick = { export.launch(name) }, enabled = !busy) {
+            Icon(Icons.Filled.Upload, null, Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text("Export")
+        }
+        androidx.compose.material3.OutlinedButton(onClick = { import.launch(arrayOf("application/zip", "application/octet-stream")) }, enabled = !busy) {
+            Icon(Icons.Filled.Download, null, Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text("Import")
+        }
+    }
+    SwitchRow(
+        "Back up automatically",
+        when {
+            backupFile == null -> "Choose a file, for example in Google Drive, and it's kept up to date after each change."
+            busy -> "Backing up…"
+            lastBackup == 0L -> "On. The first backup is being written."
+            System.currentTimeMillis() - lastBackup < 60_000 -> "On. Last backup just now."
+            else -> "On. Last backup " + android.text.format.DateUtils.getRelativeTimeSpanString(lastBackup, System.currentTimeMillis(), android.text.format.DateUtils.MINUTE_IN_MILLIS) + "."
+        },
+        backupFile != null,
+    ) { on -> if (on) keep.launch("Guided Tour backup.zip") else viewModel.setAutoBackup(null) }
 }
 
 /** Which language "Translate" uses: the phone's (the default) or one chosen from ML Kit's list. */

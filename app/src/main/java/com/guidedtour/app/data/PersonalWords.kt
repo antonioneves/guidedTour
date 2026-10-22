@@ -35,6 +35,16 @@ class PersonalWords private constructor(context: Context) {
         runCatching { file.writeText(all.joinToString("\n")) }
     }
 
+    /** Adds [more] (from a backup) to the words. */
+    @Synchronized
+    fun addAll(more: Set<String>) {
+        val new = more.map { it.lowercase() }.filter { it.isNotBlank() && it !in load() }
+        if (new.isEmpty()) return
+        val all = (load() + new).takeLast(MAX_WORDS)
+        cache = all
+        runCatching { file.writeText(all.joinToString("\n")) }
+    }
+
     private fun load(): List<String> = cache ?: runCatching { file.readLines().filter { it.isNotBlank() } }.getOrDefault(emptyList()).also { cache = it }
 
     private fun wordsOf(text: String) = Regex("""[\p{L}\p{M}]+""").findAll(text).map { it.value.lowercase() }.toSet()
