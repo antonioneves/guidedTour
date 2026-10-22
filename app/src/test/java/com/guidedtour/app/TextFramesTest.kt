@@ -127,4 +127,20 @@ class TextFramesTest {
         val tracked = tracker.update(listOf(frame(100f, 100f), TextFrame(150f, 130f, 300f, 200f, listOf(block("x", 150, 130)), true)))
         assertEquals(1, tracked.size)
     }
+
+    @Test fun framesThatOverlapAtTheCornersAreJoined() {
+        val a = frame(100f, 100f)
+        val b = frame(300f, 150f)
+        assertEquals(1, mergeOverlapping(listOf(a, b)).size)
+        // Skipped next to suggested ones stay apart unless one is mostly inside the other.
+        assertEquals(2, mergeOverlapping(listOf(a, frame(300f, 150f, suggested = false))).size)
+    }
+
+    @Test fun anUnseenFrameGoesAtOnceWhenAnotherCoversItsPlace() {
+        val tracker = FrameTracker()
+        tracker.update(listOf(frame(100f, 100f)))
+        // The text now reads as a frame elsewhere on top of the old place, too far to be matched to it.
+        val tracked = tracker.update(listOf(TextFrame(300f, 120f, 900f, 260f, listOf(block("far", 300, 120)), true)))
+        assertTrue(tracked.none { it.left < 200 })
+    }
 }

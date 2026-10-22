@@ -33,6 +33,9 @@ internal fun coverShare(l1: Float, t1: Float, r1: Float, b1: Float, l2: Float, t
 /** Frames covering this much of the smaller one are one frame. */
 internal const val SAME_FRAME = 0.6f
 
+/** Frames that are both suggested (or both skipped) and overlap this much are one frame too: tilted text makes boxes that overlap at the corners. */
+internal const val PARTLY_OVER = 0.25f
+
 /** At most this many frames are shown; the ones with the least text go first. */
 const val MAX_FRAMES = 6
 
@@ -55,7 +58,7 @@ internal fun mergeOverlapping(frames: List<TextFrame>): List<TextFrame> {
         val pair = out.indices.flatMap { i -> (i + 1 until out.size).map { i to it } }.firstOrNull { (i, j) ->
             val a = out[i]
             val b = out[j]
-            coverShare(a.left, a.top, a.right, a.bottom, b.left, b.top, b.right, b.bottom) > SAME_FRAME
+            coverShare(a.left, a.top, a.right, a.bottom, b.left, b.top, b.right, b.bottom) > (if (a.suggested == b.suggested) PARTLY_OVER else SAME_FRAME)
         } ?: return out
         val (a, b) = out[pair.first] to out[pair.second]
         out[pair.first] = frameOf((a.blocks + b.blocks).distinct(), a.suggested || b.suggested)
@@ -170,7 +173,10 @@ class FrameTracker {
             next += match
         }
         // Briefly unseen frames stay, so one blurry preview frame doesn't make them blink.
-        next += unmatched.filter { ++it.missed <= KEEP_UNSEEN }
+        // A frame not seen this time stays a few frames, unless a frame now seen covers its place.
+        next += unmatched.filter { ghost ->
+            ++ghost.missed <= KEEP_UNSEEN && next.none { coverShare(ghost.left, ghost.top, ghost.right, ghost.bottom, it.left, it.top, it.right, it.bottom) > PARTLY_OVER }
+        }
         frames = withoutDuplicates(next)
         return frames
     }
