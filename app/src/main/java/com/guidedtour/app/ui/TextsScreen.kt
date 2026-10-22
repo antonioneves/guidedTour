@@ -83,6 +83,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
@@ -137,6 +140,14 @@ fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings
     // Each scan's place, as on the map, so a visit shows the same photo as its pin.
     val placeOf = remember(scans) { groupPlaces(scans).flatMap { place -> place.scans.map { it.id to place } }.toMap() }
     val processing = scanState is ScanState.Processing
+    // Visits shown open (by id): on opening the app only the newest; the others show only their header.
+    var opened by rememberSaveable { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(loaded, visits) {
+        if (opened == null && loaded && query.isBlank() && !onlyFavorites) opened = listOfNotNull(visits.firstOrNull()?.id)
+    }
+    // While searching, every visit with a match is open, so no result is hidden.
+    val filtering = query.isNotBlank() || onlyFavorites
+    fun isOpen(visit: Visit) = filtering || visit.id in opened.orEmpty()
 
     fun delete(scan: Scan) {
         viewModel.delete(scan)
@@ -153,6 +164,10 @@ fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings
         val done = scanState as? ScanState.Done ?: return@LaunchedEffect
         query = ""
         onlyFavorites = false
+        // Its visit opens, to show it.
+        visits.firstOrNull { visit -> visit.scans.any { it.id == done.scan.id } }?.let { visit ->
+            if (visit.id !in opened.orEmpty()) opened = opened.orEmpty() + visit.id
+        }
         val index = listIndexOf(visits, done.scan.id) ?: return@LaunchedEffect
         highlightId = done.scan.id
         viewModel.dismissResult()
@@ -224,8 +239,17 @@ fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings
                     }
                 }
                 visits.forEach { visit ->
-                    item(key = "visit-${visit.id}") { VisitHeader(visit, visit.scans.firstNotNullOfOrNull { placeOf[it.id] }, viewModel, onPlay = { viewModel.playAll(visit.chronological) }) }
-                    items(visit.scans, key = { it.id }) { scan ->
+                    val open = isOpen(visit)
+                    item(key = "visit-${visit.id}") {
+                        VisitHeader(
+                            visit, visit.scans.firstNotNullOfOrNull { placeOf[it.id] }, viewModel,
+                            open = open,
+                            onToggle = if (filtering) null else { { opened = if (open) opened.orEmpty() - visit.id else opened.orEmpty() + visit.id } },
+                            onPlay = { viewModel.playAll(visit.chronological) },
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
+                    if (open) items(visit.scans, key = { it.id }) { scan ->
                         ScanCard(
                             scan, player, scan.id in translating, target, viewModel,
                             highlighted = scan.id == highlightId,
@@ -239,15 +263,35 @@ fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings
     }
 }
 
+/**
+ * A visit's header: its place (with the place's photo behind, where there is one), day and number
+ * of texts. Tapping it opens or closes the visit's cards ([onToggle]; null while searching, when
+ * every visit with a match stays [open]).
+ */
 @Composable
-private fun VisitHeader(visit: Visit, place: Place?, viewModel: TourViewModel, onPlay: () -> Unit) {
+private fun VisitHeader(
+    visit: Visit,
+    place: Place?,
+    viewModel: TourViewModel,
+    open: Boolean,
+    onToggle: (() -> Unit)?,
+    onPlay: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val day = visit.day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
     val title = visit.place?.let { "$it · $day" } ?: day
     val count = if (visit.scans.size == 1) "1 text" else "${visit.scans.size} texts"
     val photo = rememberPlacePhoto(viewModel, place?.photoSpot())
+    val turn by animateFloatAsState(if (open) 180f else 0f, label = "visit arrow")
+    val toggle = if (onToggle == null) Modifier else Modifier.clickable(onClickLabel = if (open) "Hide its texts" else "Show its texts", onClick = onToggle)
+    val state = Modifier.semantics { stateDescription = if (open) "Open" else "Closed" }
+    @Composable
+    fun Arrow(tint: Color) {
+        if (onToggle != null) Icon(Icons.Filled.KeyboardArrowDown, null, Modifier.rotate(turn), tint = tint)
+    }
     if (photo != null) {
         // The place's photo behind its name, white on the photo's darkened bottom.
-        PlacePhotoBanner(photo, Modifier.padding(top = 8.dp)) {
+        PlacePhotoBanner(photo, modifier.padding(top = 8.dp).clip(MaterialTheme.shapes.large).then(toggle).then(state)) {
             Row(
                 Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -256,6 +300,8 @@ private fun VisitHeader(visit: Visit, place: Place?, viewModel: TourViewModel, o
                     Text(title, style = MaterialTheme.typography.titleMedium, color = Color.White, modifier = Modifier.semantics { heading() })
                     Text(count, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.85f))
                 }
+                Arrow(Color.White)
+                Spacer(Modifier.size(4.dp))
                 if (visit.scans.size > 1) {
                     FilledTonalButton(onClick = onPlay) {
                         Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, Modifier.size(ButtonDefaults.IconSize))
@@ -267,11 +313,15 @@ private fun VisitHeader(visit: Visit, place: Place?, viewModel: TourViewModel, o
         }
         return
     }
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier.fillMaxWidth().padding(top = 8.dp).clip(MaterialTheme.shapes.medium).then(toggle).then(state).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             Text(count, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Arrow(MaterialTheme.colorScheme.onSurfaceVariant)
         if (visit.scans.size > 1) {
             TextButton(onClick = onPlay) {
                 Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, Modifier.size(ButtonDefaults.IconSize))
@@ -461,7 +511,7 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 
 private const val HIGHLIGHT_MS = 3000L
 
-/** Position of [scanId] in the list: the search field first, then each visit's header and scans. */
+/** Position of [scanId] in the list: the search field first, then each visit's header and scans (all open). */
 private fun listIndexOf(visits: List<Visit>, scanId: Long): Int? {
     var index = 1
     for (visit in visits) {
