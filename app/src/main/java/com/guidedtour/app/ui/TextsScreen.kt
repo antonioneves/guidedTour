@@ -85,6 +85,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.animation.animateBounds
+import androidx.compose.ui.layout.LookaheadScope
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.ui.draw.rotate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.semantics.stateDescription
@@ -452,72 +456,81 @@ private fun ScanCard(
                     }
                 }
             }
-            // Closed: the photo, the headline (or the text's start) with the language Listen reads it in, and Listen.
-            val language = if (useTranslation && scan.translation != null) {
-                (scan.translationTag?.let(Translator::nameOf) ?: "Translation") + " (translated)"
-            } else {
-                scan.languageLabel()
-            }
-            val translated = useTranslation && scan.translation != null
-            // The title in the language Listen reads in (the original one until the translated one is there).
+            // Closed: the photo, the title (or the text's start) with the version Listen reads, and Listen.
+            // Opened: that version first, under the same label (which slides down to head it), then the other.
+            val translation = scan.translation
+            val translated = useTranslation && translation != null
             val title = if (translated) scan.translatedHeadline ?: scan.headline else scan.headline
-            val status = listOfNotNull(language, if (queued) "In queue" else null, if (translating) "Translating…" else null).joinToString(" · ")
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Thumbnail(
-                    scan.thumbnail,
-                    Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "View photo") { viewing = true },
-                    maxSide = 256,
-                )
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (title != null) {
-                        Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    } else if (!expanded) {
-                        Text(scan.text, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    }
-                    if (status.isNotEmpty()) {
-                        Text(status, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                ListenButton(scan, player, translating, target, viewModel, useTranslation) { useTranslation = it }
+            val originalLabel = "Original" + (scan.languageLabel()?.let { " · $it" } ?: "")
+            val translationLabel = "Translation" + (scan.translationTag?.let { " · ${Translator.nameOf(it)}" } ?: "")
+            // Without a translation there's one version: its language, which stays put.
+            val label = when {
+                translation == null -> scan.languageLabel()
+                translated -> translationLabel
+                else -> originalLabel
             }
-            // Opened: the whole original, then the translation, each under its language (and the
-            // original's title when the card's is the translated one; a printed title is already the text's first line).
-            if (expanded) {
-                val translation = scan.translation
-                Column(Modifier.padding(top = 4.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (translation != null) {
+            val extras = listOfNotNull(if (queued) "In queue" else null, if (translating) "Translating…" else null).joinToString(" · ")
+            LookaheadScope {
+                val lookahead = this
+                val movingLabel = remember(scan.id) {
+                    movableContentOf { text: String, primary: Boolean ->
                         Text(
-                            "Original" + (scan.languageLabel()?.let { " · $it" } ?: ""),
+                            text,
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = if (primary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.animateBounds(lookahead),
                         )
-                        val original = scan.headline
-                        if (translated && original != null && original != title && !scan.text.startsWith(original, ignoreCase = true)) {
-                            Text(original, style = MaterialTheme.typography.titleSmall)
-                        }
                     }
-                    HighlightedText(
-                        scan.text,
-                        if (current?.translated == false) player.highlight else null,
-                        MaterialTheme.typography.bodyLarge,
-                    )
                 }
-                if (translation != null) {
-                    Column(Modifier.padding(top = 4.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            "Translation" + (scan.translationTag?.let { " · ${Translator.nameOf(it)}" } ?: ""),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                val slides = expanded && translation != null
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Thumbnail(
+                            scan.thumbnail,
+                            Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "View photo") { viewing = true },
+                            maxSide = 256,
                         )
-                        val translatedTitle = scan.translatedHeadline
-                        if (!translated && translatedTitle != null && !translation.startsWith(translatedTitle, ignoreCase = true)) {
-                            Text(translatedTitle, style = MaterialTheme.typography.titleSmall)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            if (title != null) {
+                                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            } else if (!expanded) {
+                                Text(scan.text, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                            if (!slides && label != null) movingLabel(label, false)
+                            if (extras.isNotEmpty()) {
+                                Text(extras, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
-                        HighlightedText(
-                            translation,
-                            if (current?.translated == true) player.highlight else null,
-                            MaterialTheme.typography.bodyMedium,
-                        )
+                        ListenButton(scan, player, translating, target, viewModel, useTranslation) { useTranslation = it }
+                    }
+                    if (expanded) {
+                        @Composable
+                        fun Version(heading: String?, otherTitle: String?, text: String, reading: Boolean, primary: Boolean, style: TextStyle) {
+                            Column(Modifier.padding(top = 4.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                if (heading != null) {
+                                    if (primary) movingLabel(heading, true)
+                                    else Text(heading, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                }
+                                // The other version's own title, unless it's printed as the text's first line.
+                                if (otherTitle != null && otherTitle != title && !text.startsWith(otherTitle, ignoreCase = true)) {
+                                    Text(otherTitle, style = MaterialTheme.typography.titleSmall)
+                                }
+                                HighlightedText(text, if (reading) player.highlight else null, style)
+                            }
+                        }
+                        val originalReading = current?.translated == false
+                        val translationReading = current?.translated == true
+                        when {
+                            translation == null -> Version(null, null, scan.text, originalReading, true, MaterialTheme.typography.bodyLarge)
+                            translated -> {
+                                Version(translationLabel, null, translation, translationReading, true, MaterialTheme.typography.bodyLarge)
+                                Version(originalLabel, scan.headline, scan.text, originalReading, false, MaterialTheme.typography.bodyMedium)
+                            }
+                            else -> {
+                                Version(originalLabel, null, scan.text, originalReading, true, MaterialTheme.typography.bodyLarge)
+                                Version(translationLabel, scan.translatedHeadline, translation, translationReading, false, MaterialTheme.typography.bodyMedium)
+                            }
+                        }
                     }
                 }
             }
