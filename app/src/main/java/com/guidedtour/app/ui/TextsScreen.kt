@@ -382,7 +382,7 @@ private fun ScanCard(
         colors = CardDefaults.cardColors(containerColor = container),
         modifier = modifier.fillMaxWidth().animateContentSize().clickable(onClickLabel = if (expanded) "Collapse" else "Expand") { expanded = !expanded },
     ) {
-        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Place, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.size(6.dp))
@@ -452,7 +452,7 @@ private fun ScanCard(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(end = 8.dp)) {
                 Thumbnail(
                     scan.thumbnail,
-                    Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "View photo") { viewing = true },
+                    Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "View photo") { viewing = true },
                     maxSide = 256,
                 )
                 // A headline, where there is one, stands for the text until the card is opened.
