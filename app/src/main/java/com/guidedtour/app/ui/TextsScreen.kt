@@ -318,16 +318,24 @@ private fun VisitHeader(
         }
         return
     }
+    // No photo: a tonal banner shaped like the photo one, the arrow on a disc at its start.
+    val colors = MaterialTheme.colorScheme
     Row(
-        modifier.fillMaxWidth().padding(top = 8.dp).clip(MaterialTheme.shapes.medium).then(toggle).then(state).padding(vertical = 4.dp),
+        modifier.fillMaxWidth().padding(top = 8.dp).clip(MaterialTheme.shapes.large).background(colors.surfaceContainerHighest)
+            .then(toggle).then(state).padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Arrow(MaterialTheme.colorScheme.onSurfaceVariant, Modifier.padding(end = 8.dp).align(Alignment.Top))
+        if (onToggle != null) {
+            Box(Modifier.size(36.dp).clip(CircleShape).background(colors.secondaryContainer), contentAlignment = Alignment.Center) {
+                Arrow(colors.onSecondaryContainer)
+            }
+            Spacer(Modifier.size(12.dp))
+        }
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-            Text(count, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(count, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
-        TextButton(onClick = onPlay) {
+        FilledTonalButton(onClick = onPlay) {
             Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text("Play visit")
