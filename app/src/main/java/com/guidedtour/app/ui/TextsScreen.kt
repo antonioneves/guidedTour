@@ -270,6 +270,7 @@ fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings
  * of texts. Tapping it opens or closes the visit's cards ([onToggle]; null while searching, when
  * every visit with a match stays [open]).
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun VisitHeader(
     visit: Visit,
@@ -318,7 +319,7 @@ private fun VisitHeader(
         }
         return
     }
-    // No photo: a tonal banner shaped like the photo one, the arrow at its end.
+    // No photo: a tonal banner shaped like the photo one, the arrow part of Play visit, as a split button.
     val colors = MaterialTheme.colorScheme
     Row(
         modifier.fillMaxWidth().padding(top = 8.dp).clip(MaterialTheme.shapes.large).background(colors.surfaceContainerHighest)
@@ -329,12 +330,27 @@ private fun VisitHeader(
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             Text(count, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
-        FilledTonalButton(onClick = onPlay) {
+        val play: @Composable RowScope.() -> Unit = {
             Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text("Play visit")
         }
-        Arrow(colors.onSurfaceVariant, Modifier.padding(start = 8.dp, end = 4.dp))
+        if (onToggle == null) {
+            FilledTonalButton(onClick = onPlay, content = play)
+        } else {
+            SplitButtonLayout(
+                leadingButton = { SplitButtonDefaults.TonalLeadingButton(onClick = onPlay, content = play) },
+                trailingButton = {
+                    SplitButtonDefaults.TonalTrailingButton(
+                        checked = open,
+                        onCheckedChange = { onToggle() },
+                        modifier = Modifier.semantics { contentDescription = if (open) "Hide its texts" else "Show its texts" },
+                    ) {
+                        Icon(Icons.Filled.KeyboardArrowDown, null, Modifier.size(SplitButtonDefaults.TrailingIconSize).rotate(turn))
+                    }
+                },
+            )
+        }
     }
 }
 
