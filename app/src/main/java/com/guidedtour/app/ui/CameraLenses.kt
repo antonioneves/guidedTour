@@ -60,7 +60,8 @@ suspend fun cameraChoices(context: Context): CameraChoices? = runCatching {
         val label = label(ratio)
         val front = info.lensFacing == CameraSelector.LENS_FACING_FRONT
         if (lenses.any { it.front == front && it.label == label }) return
-        val night = extensions?.isExtensionAvailable(info.cameraSelector, ExtensionMode.NIGHT) == true
+        // Not below 1×: on the Pixel the wide end comes out dark in night mode.
+        val night = zoom >= 1f && extensions?.isExtensionAvailable(info.cameraSelector, ExtensionMode.NIGHT) == true
         val nightLive = night && extensions?.let {
             runCatching { it.isImageAnalysisSupported(info.cameraSelector, ExtensionMode.NIGHT) }.getOrDefault(false)
         } == true

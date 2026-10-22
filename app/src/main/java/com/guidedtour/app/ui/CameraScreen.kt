@@ -809,6 +809,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                 lenses = c.lenses,
                 selected = lens,
                 zoom = zoom,
+                switching = switching,
                 night = nightOn,
                 onSelect = { lensKey = key(it) },
                 onNight = {
@@ -975,6 +976,7 @@ private fun LensBar(
     lenses: List<Lens>,
     selected: Lens?,
     zoom: Float,
+    switching: Boolean,
     night: Boolean,
     onSelect: (Lens) -> Unit,
     onNight: () -> Unit,
@@ -998,8 +1000,8 @@ private fun LensBar(
                     if (lens.front) {
                         Icon(Icons.Filled.Cameraswitch, null, Modifier.size(18.dp).rotate(iconAngle))
                     } else {
-                        // Pinched away from the chip's zoom: show where it is now.
-                        val shown = if (chosen && abs(zoom - lens.zoom) > 0.05f) String.format(Locale.US, "%.1f×", zoom) else lens.label
+                        // Pinched away from the chip's zoom: show where it is now (not while switching: the new camera starts at 1×).
+                        val shown = if (chosen && !switching && abs(zoom - lens.zoom) > 0.05f) String.format(Locale.US, "%.1f×", zoom) else lens.label
                         Text(shown, style = MaterialTheme.typography.labelMedium, modifier = Modifier.rotate(iconAngle))
                     }
                 }
