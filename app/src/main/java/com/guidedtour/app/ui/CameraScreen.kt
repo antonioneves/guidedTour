@@ -465,15 +465,19 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             // The zoom applies to the camera once it's open (switching cameras can take a few seconds), and
             // is checked: a camera that was still opening, or a switch cut short by another tap, drops it.
             val facing = if (chosen.front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-            repeat(40) {
-                val info = controller.cameraInfo
-                if (info != null && info.lensFacing == facing && withTimeoutOrNull(3_000) { info.opens() } == true) {
-                    controller.setZoomRatio(chosen.zoom)
-                    delay(100)
-                    val now = controller.zoomState.value?.zoomRatio
-                    if (now != null && abs(now - chosen.zoom) < 0.05f) return@LaunchedEffect
-                } else {
-                    delay(100)
+            // Given up after a few seconds: a zoom the camera can't reach (night mode's range differs)
+            // mustn't leave the veil up.
+            withTimeoutOrNull(8_000) {
+                while (true) {
+                    val info = controller.cameraInfo
+                    if (info != null && info.lensFacing == facing && withTimeoutOrNull(3_000) { info.opens() } == true) {
+                        controller.setZoomRatio(chosen.zoom)
+                        delay(100)
+                        val state = controller.zoomState.value
+                        if (state != null && abs(state.zoomRatio - chosen.zoom.coerceIn(state.minZoomRatio, state.maxZoomRatio)) < 0.05f) return@withTimeoutOrNull
+                    } else {
+                        delay(100)
+                    }
                 }
             }
         } finally {
