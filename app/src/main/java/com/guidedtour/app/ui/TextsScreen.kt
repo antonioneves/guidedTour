@@ -84,6 +84,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.animation.animateBounds
 import androidx.compose.ui.layout.LookaheadScope
@@ -562,6 +564,9 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 
 private const val HIGHLIGHT_MS = 3000L
 
+/** Every label Listen can show, to size it for the widest. */
+private val LISTEN_LABELS = listOf("Listen", "Pause", "Resume")
+
 /** Position of [scanId] in the list: the search field first, then each visit's header and scans (all open). */
 private fun listIndexOf(visits: List<Visit>, scanId: Long): Int? {
     var index = 1
@@ -632,7 +637,11 @@ private fun ListenButton(
     val content: @Composable RowScope.() -> Unit = {
         Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(ButtonDefaults.IconSize))
         Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // As wide as its widest label, so the button keeps its size between Listen, Pause and Resume.
+        Box(contentAlignment = Alignment.CenterStart) {
+            LISTEN_LABELS.forEach { Text(it, maxLines = 1, modifier = Modifier.alpha(0f).clearAndSetSemantics {}) }
+            Text(label, maxLines = 1)
+        }
     }
     if (!hasTranslation && !translatable) {
         FilledTonalButton(onClick = { play(false) }, content = content)
