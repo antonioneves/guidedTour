@@ -453,7 +453,11 @@ private fun ScanCard(
                 }
             }
             // Closed: the photo, the headline (or the text's start) with the language Listen reads it in, and Listen.
-            val language = if (useTranslation && scan.translation != null) scan.translationTag?.let(Translator::nameOf) else scan.languageLabel()
+            val language = if (useTranslation && scan.translation != null) {
+                (scan.translationTag?.let(Translator::nameOf) ?: "Translation") + " (translated)"
+            } else {
+                scan.languageLabel()
+            }
             val status = listOfNotNull(language, if (queued) "In queue" else null, if (translating) "Translating…" else null).joinToString(" · ")
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Thumbnail(
