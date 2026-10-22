@@ -82,6 +82,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.animation.core.VectorConverter
@@ -421,59 +423,62 @@ private fun ScanCard(
                     modifier = Modifier.weight(1f),
                 )
                 Text(scan.timeLabel(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FavoriteButton(scan) { viewModel.toggleFavorite(scan) }
-                TranslateButton(scan, translating, target, useTranslation, { useTranslation = it }, viewModel)
-                Box {
-                    IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More actions") }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Play next") },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null) },
-                            onClick = { menu = false; viewModel.playNext(scan) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Add to queue") },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) },
-                            onClick = { menu = false; viewModel.addToQueue(scan) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Fix text") },
-                            leadingIcon = { Icon(Icons.Filled.Edit, null) },
-                            onClick = { menu = false; editing = true },
-                        )
-                        if (paragraphsOf(scan.text).size > 1) {
+                // Closer together than icon buttons' usual 48 dp, still easy to tap.
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 40.dp) {
+                    FavoriteButton(scan) { viewModel.toggleFavorite(scan) }
+                    TranslateButton(scan, translating, target, useTranslation, { useTranslation = it }, viewModel)
+                    Box {
+                        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More actions") }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             DropdownMenuItem(
-                                text = { Text("Choose paragraphs") },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Notes, null) },
-                                onClick = { menu = false; choosing = true },
+                                text = { Text("Play next") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null) },
+                                onClick = { menu = false; viewModel.playNext(scan) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Add to queue") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) },
+                                onClick = { menu = false; viewModel.addToQueue(scan) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Fix text") },
+                                leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                                onClick = { menu = false; editing = true },
+                            )
+                            if (paragraphsOf(scan.text).size > 1) {
+                                DropdownMenuItem(
+                                    text = { Text("Choose paragraphs") },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Notes, null) },
+                                    onClick = { menu = false; choosing = true },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Language") },
+                                leadingIcon = { Icon(Icons.Filled.Language, null) },
+                                onClick = { menu = false; choosingLanguage = true },
+                            )
+                            if (viewModel.cloudAvailable && scan.thumbnail != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Improve with cloud") },
+                                    leadingIcon = { Icon(Icons.Filled.Translate, null) },
+                                    onClick = { menu = false; confirmCloud = true },
+                                )
+                            }
+                            if (Translator.needsTranslation(scan.allLanguages(), target)) {
+                                DropdownMenuItem(
+                                    text = { Text(if (scan.translationTag == target) "Translate again" else "Translate into ${Translator.nameOf(target)}") },
+                                    leadingIcon = { Icon(Icons.Filled.Translate, null) },
+                                    enabled = !translating,
+                                    onClick = { menu = false; viewModel.translate(scan) },
+                                )
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Delete") },
+                                leadingIcon = { Icon(Icons.Filled.Delete, null) },
+                                onClick = { menu = false; onDelete() },
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text("Language") },
-                            leadingIcon = { Icon(Icons.Filled.Language, null) },
-                            onClick = { menu = false; choosingLanguage = true },
-                        )
-                        if (viewModel.cloudAvailable && scan.thumbnail != null) {
-                            DropdownMenuItem(
-                                text = { Text("Improve with cloud") },
-                                leadingIcon = { Icon(Icons.Filled.Translate, null) },
-                                onClick = { menu = false; confirmCloud = true },
-                            )
-                        }
-                        if (Translator.needsTranslation(scan.allLanguages(), target)) {
-                            DropdownMenuItem(
-                                text = { Text(if (scan.translationTag == target) "Translate again" else "Translate into ${Translator.nameOf(target)}") },
-                                leadingIcon = { Icon(Icons.Filled.Translate, null) },
-                                enabled = !translating,
-                                onClick = { menu = false; viewModel.translate(scan) },
-                            )
-                        }
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("Delete") },
-                            leadingIcon = { Icon(Icons.Filled.Delete, null) },
-                            onClick = { menu = false; onDelete() },
-                        )
                     }
                 }
             }
