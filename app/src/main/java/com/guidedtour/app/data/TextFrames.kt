@@ -31,11 +31,19 @@ internal fun coverShare(l1: Float, t1: Float, r1: Float, b1: Float, l2: Float, t
     return w * h / min((r1 - l1) * (b1 - t1), (r2 - l2) * (b2 - t2))
 }
 
+/** The share of the first box that the second covers. */
+internal fun coveredShare(l1: Float, t1: Float, r1: Float, b1: Float, l2: Float, t2: Float, r2: Float, b2: Float): Float {
+    val w = min(r1, r2) - max(l1, l2)
+    val h = min(b1, b2) - max(t1, t2)
+    if (w <= 0 || h <= 0) return 0f
+    return w * h / ((r1 - l1) * (b1 - t1))
+}
+
 /** Frames covering this much of the smaller one are one frame. */
 internal const val SAME_FRAME = 0.6f
 
 /** Frames that are both suggested (or both skipped) and overlap this much are one frame too: tilted text makes boxes that overlap at the corners. */
-internal const val PARTLY_OVER = 0.25f
+internal const val PARTLY_OVER = 0.4f
 
 /** At most this many frames are shown; the ones with the least text go first. */
 const val MAX_FRAMES = 6
@@ -188,9 +196,10 @@ class FrameTracker {
             next += match
         }
         // Briefly unseen frames stay, so one blurry preview frame doesn't make them blink.
-        // A frame not seen this time stays a few frames, unless a frame now seen covers its place.
+        // A frame not seen this time stays a few frames, unless frames now seen mostly cover its place
+        // (a small piece of text read inside it doesn't count: the rest of it may just be blurred).
         next += unmatched.filter { ghost ->
-            ++ghost.missed <= KEEP_UNSEEN && next.none { coverShare(ghost.left, ghost.top, ghost.right, ghost.bottom, it.left, it.top, it.right, it.bottom) > PARTLY_OVER }
+            ++ghost.missed <= KEEP_UNSEEN && next.none { coveredShare(ghost.left, ghost.top, ghost.right, ghost.bottom, it.left, it.top, it.right, it.bottom) > GHOST_COVERED }
         }
         frames = withoutDuplicates(next)
         return frames
@@ -239,7 +248,12 @@ class FrameTracker {
         val both = w * h
         val union = both / ((a.right - a.left) * (a.bottom - a.top) + (b.right - b.left) * (b.bottom - b.top) - both)
         val inside = coverShare(a.left, a.top, a.right, a.bottom, b.left, b.top, b.right, b.bottom)
-        return max(union, if (inside > SAME_FRAME) inside - SAME_FRAME + MATCH_OVERLAP + 0.01f else 0f)
+        // Only frames of a similar size are the same text grown or shrunk: a few words read inside a
+        // big block aren't that block.
+        val areaA = (a.right - a.left) * (a.bottom - a.top)
+        val areaB = (b.right - b.left) * (b.bottom - b.top)
+        val similar = min(areaA, areaB) >= SIMILAR_SIZE * max(areaA, areaB)
+        return max(union, if (inside > SAME_FRAME && similar) inside - SAME_FRAME + MATCH_OVERLAP + 0.01f else 0f)
     }
 
     /** [list] without frames mostly inside another: the longer seen (or the user's choice) stays. */
@@ -268,7 +282,11 @@ class FrameTracker {
         const val GLIDE = 0.3f
         const val KEEP_UNSEEN = 6
         const val SETTLE = 6
-        const val SHOW_AFTER = 3
+        const val SHOW_AFTER = 2
+        /** An unseen frame goes at once when frames seen now cover this share of it. */
+        const val GHOST_COVERED = 0.6f
+        /** The smaller of two frames matched by one lying in the other is at least this share of the larger. */
+        const val SIMILAR_SIZE = 0.4f
         /** A shift under this share of the frame's size counts as calm. */
         const val HOLD = 0.05f
         /** Calm frames running before a frame locks. */

@@ -130,18 +130,18 @@ class TextFramesTest {
 
     @Test fun framesThatOverlapAtTheCornersAreJoined() {
         val a = frame(100f, 100f)
-        val b = frame(300f, 150f)
+        val b = frame(250f, 130f)
         assertEquals(1, mergeOverlapping(listOf(a, b)).size)
         // Skipped next to suggested ones stay apart unless one is mostly inside the other.
-        assertEquals(2, mergeOverlapping(listOf(a, frame(300f, 150f, suggested = false))).size)
+        assertEquals(2, mergeOverlapping(listOf(a, frame(250f, 130f, suggested = false))).size)
     }
 
     @Test fun anUnseenFrameGoesAtOnceWhenAnotherCoversItsPlace() {
         val tracker = FrameTracker()
         tracker.update(listOf(frame(100f, 100f)))
         // The text now reads as a frame elsewhere on top of the old place, too far to be matched to it.
-        val tracked = tracker.update(listOf(TextFrame(300f, 120f, 900f, 260f, listOf(block("far", 300, 120)), true)))
-        assertTrue(tracked.none { it.left < 200 })
+        val tracked = tracker.update(listOf(TextFrame(150f, 90f, 1100f, 500f, listOf(block("far", 150, 90)), true)))
+        assertTrue(tracked.none { it.left < 140 })
     }
 
     @Test fun aSteadyFrameHoldsStillThroughJitter() {
@@ -172,5 +172,13 @@ class TextFramesTest {
         assertTrue(both.single().blocks.contains(main))
         // Alone, the text at the edge is all there is to read.
         assertEquals(1, textFrames(listOf(cut), 1600, 1200).size)
+    }
+
+    @Test fun aBigFrameStaysWhenOnlyASmallPieceOfItIsSeen() {
+        val tracker = FrameTracker()
+        repeat(3) { tracker.update(listOf(frame(100f, 100f))) }
+        // This time only a few words inside it are read.
+        val tracked = tracker.update(listOf(TextFrame(150f, 130f, 300f, 200f, listOf(block("x", 150, 130)), true)))
+        assertTrue(tracked.any { it.left < 110 && it.right > 450 })
     }
 }
