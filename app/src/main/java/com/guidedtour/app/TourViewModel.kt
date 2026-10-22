@@ -119,7 +119,8 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
             val recent = loadedScans.filterNotNull().first().take(20).mapNotNull { it.languageTag }
             (listOf(Locale.getDefault().language) + recent).distinct().take(2).forEach { wordLists.of(it) }
         }
-        viewModelScope.launch { writeHeadlines() }
+        // Off the main thread: reaching AICore can block, above all on phones without it.
+        viewModelScope.launch(Dispatchers.Default) { writeHeadlines() }
     }
 
     /**
