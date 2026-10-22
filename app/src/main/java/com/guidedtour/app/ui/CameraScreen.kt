@@ -453,15 +453,19 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                 launch { snackbar.showSnackbar("Night mode isn't available with this lens") }
             }
         }
-        // The zoom applies to the camera once it's open (switching cameras can take a few seconds).
-        repeat(100) {
+        // The zoom applies to the camera once it's open (switching cameras can take a few seconds), and
+        // is checked: a camera that was still opening, or a switch cut short by another tap, drops it.
+        val facing = if (chosen.front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+        repeat(40) {
             val info = controller.cameraInfo
-            val facing = if (chosen.front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-            if (info != null && info.lensFacing == facing && controller.zoomState.value != null) {
+            if (info != null && info.lensFacing == facing && withTimeoutOrNull(3_000) { info.opens() } == true) {
                 controller.setZoomRatio(chosen.zoom)
-                return@LaunchedEffect
+                delay(200)
+                val now = controller.zoomState.value?.zoomRatio
+                if (now != null && abs(now - chosen.zoom) < 0.05f) return@LaunchedEffect
+            } else {
+                delay(100)
             }
-            delay(50)
         }
     }
 
