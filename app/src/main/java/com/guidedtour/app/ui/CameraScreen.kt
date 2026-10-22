@@ -1101,7 +1101,7 @@ private suspend fun androidx.camera.core.CameraInfo.opens(): Boolean = suspendCa
         }
     }
     cameraState.observeForever(observer)
-    cont.invokeOnCancellation { cameraState.removeObserver(observer) }
+    cont.invokeOnCancellation { onMain { cameraState.removeObserver(observer) } }
 }
 
 /** Waits until the preview shows camera frames (true). */
@@ -1114,5 +1114,11 @@ private suspend fun PreviewView.streams(): Boolean = suspendCancellableCoroutine
         }
     }
     previewStreamState.observeForever(observer)
-    cont.invokeOnCancellation { previewStreamState.removeObserver(observer) }
+    cont.invokeOnCancellation { onMain { previewStreamState.removeObserver(observer) } }
+}
+
+/** LiveData observers come off on the main thread; a cancelled wait can be cancelled from any other. */
+private fun onMain(block: () -> Unit) {
+    if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) block()
+    else android.os.Handler(android.os.Looper.getMainLooper()).post(block)
 }
