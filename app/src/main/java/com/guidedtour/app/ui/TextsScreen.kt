@@ -458,6 +458,9 @@ private fun ScanCard(
             } else {
                 scan.languageLabel()
             }
+            val translated = useTranslation && scan.translation != null
+            // The title in the language Listen reads in (the original one until the translated one is there).
+            val title = if (translated) scan.translatedHeadline ?: scan.headline else scan.headline
             val status = listOfNotNull(language, if (queued) "In queue" else null, if (translating) "Translating…" else null).joinToString(" · ")
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Thumbnail(
@@ -466,8 +469,8 @@ private fun ScanCard(
                     maxSide = 256,
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (scan.headline != null) {
-                        Text(scan.headline, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (title != null) {
+                        Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     } else if (!expanded) {
                         Text(scan.text, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
@@ -477,23 +480,41 @@ private fun ScanCard(
                 }
                 ListenButton(scan, player, translating, target, viewModel, useTranslation) { useTranslation = it }
             }
-            // Opened: the whole text, and its translation (a printed title isn't repeated above it: it's the text's first line).
+            // Opened: the whole original, then the translation, each under its language (and the
+            // original's title when the card's is the translated one; a printed title is already the text's first line).
             if (expanded) {
-                HighlightedText(
-                    scan.text,
-                    if (current?.translated == false) player.highlight else null,
-                    MaterialTheme.typography.bodyLarge,
-                    Modifier.padding(top = 4.dp, end = 8.dp),
-                )
-                if (scan.translation != null) {
-                    Column(Modifier.padding(top = 4.dp, end = 8.dp)) {
+                val translation = scan.translation
+                Column(Modifier.padding(top = 4.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (translation != null) {
+                        Text(
+                            "Original" + (scan.languageLabel()?.let { " · $it" } ?: ""),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        val original = scan.headline
+                        if (translated && original != null && original != title && !scan.text.startsWith(original, ignoreCase = true)) {
+                            Text(original, style = MaterialTheme.typography.titleSmall)
+                        }
+                    }
+                    HighlightedText(
+                        scan.text,
+                        if (current?.translated == false) player.highlight else null,
+                        MaterialTheme.typography.bodyLarge,
+                    )
+                }
+                if (translation != null) {
+                    Column(Modifier.padding(top = 4.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
                             "Translation" + (scan.translationTag?.let { " · ${Translator.nameOf(it)}" } ?: ""),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                         )
+                        val translatedTitle = scan.translatedHeadline
+                        if (!translated && translatedTitle != null && !translation.startsWith(translatedTitle, ignoreCase = true)) {
+                            Text(translatedTitle, style = MaterialTheme.typography.titleSmall)
+                        }
                         HighlightedText(
-                            scan.translation,
+                            translation,
                             if (current?.translated == true) player.highlight else null,
                             MaterialTheme.typography.bodyMedium,
                         )

@@ -20,7 +20,7 @@ class BackupTest {
     private fun scan(time: Long, photo: String? = null) = Scan(
         text = "The Parthenon was built between 447 and 432 BC.", timestamp = time, latitude = 37.97, longitude = 23.72,
         placeName = "Acropolis", languageTag = "en", thumbnail = photo, favorite = true, translation = "Der Parthenon…",
-        translationTag = "de", headline = "The Parthenon",
+        translationTag = "de", headline = "The Parthenon", translatedHeadline = "Der Parthenon",
     )
 
     @Test fun guidesAndPhotosComeBackAsTheyWere() {

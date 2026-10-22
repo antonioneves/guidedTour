@@ -103,6 +103,7 @@ object Backup {
                 scan.languages?.let { put("languages", it) }
                 put("languageFixed", scan.languageFixed)
                 scan.headline?.let { put("headline", it) }
+                scan.translatedHeadline?.let { put("translatedHeadline", it) }
             })
         })
         put("personalWords", JSONArray(words.sorted()))
@@ -131,6 +132,7 @@ object Backup {
                 languages = string("languages"),
                 languageFixed = g.optBoolean("languageFixed", false),
                 headline = string("headline"),
+                translatedHeadline = string("translatedHeadline"),
             )
         }
         val list = root.optJSONArray("personalWords")

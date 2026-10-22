@@ -35,6 +35,8 @@ data class Scan(
     @ColumnInfo(defaultValue = "0") val languageFixed: Boolean = false,
     /** A few words naming the text's topic, for its card (see [Headliner]); null until written, or where the phone can't. */
     val headline: String? = null,
+    /** [headline] in [translationTag]'s language, shown while the translation is the one read; null until translated. */
+    val translatedHeadline: String? = null,
 ) {
     /** The languages of the text in reading order, or none if unknown. */
     fun spans(): List<LanguageSpan> =
@@ -61,23 +63,27 @@ interface ScanDao {
     @Query("DELETE FROM scans WHERE id = :id")
     suspend fun delete(id: Long)
 
-    @Query("UPDATE scans SET text = :text, languageTag = :languageTag, languages = :languages, translation = NULL, translationTag = NULL, headline = NULL WHERE id = :id")
+    @Query("UPDATE scans SET text = :text, languageTag = :languageTag, languages = :languages, translation = NULL, translationTag = NULL, headline = NULL, translatedHeadline = NULL WHERE id = :id")
     suspend fun updateText(id: Long, text: String, languageTag: String?, languages: String?)
 
-    @Query("UPDATE scans SET languageTag = :languageTag, languages = :languages, languageFixed = :fixed, translation = NULL, translationTag = NULL, headline = NULL WHERE id = :id")
+    @Query("UPDATE scans SET languageTag = :languageTag, languages = :languages, languageFixed = :fixed, translation = NULL, translationTag = NULL, headline = NULL, translatedHeadline = NULL WHERE id = :id")
     suspend fun setLanguage(id: Long, languageTag: String?, languages: String?, fixed: Boolean)
 
     @Query("UPDATE scans SET favorite = :favorite WHERE id = :id")
     suspend fun setFavorite(id: Long, favorite: Boolean)
 
-    @Query("UPDATE scans SET translation = :translation, translationTag = :tag WHERE id = :id")
-    suspend fun setTranslation(id: Long, translation: String, tag: String)
+    @Query("UPDATE scans SET translation = :translation, translationTag = :tag, translatedHeadline = :headline WHERE id = :id")
+    suspend fun setTranslation(id: Long, translation: String, tag: String, headline: String?)
 
-    @Query("UPDATE scans SET headline = :headline WHERE id = :id")
+    @Query("UPDATE scans SET translatedHeadline = :headline WHERE id = :id")
+    suspend fun setTranslatedHeadline(id: Long, headline: String)
+
+    /** A new headline: its translation, of the old one, goes with it. */
+    @Query("UPDATE scans SET headline = :headline, translatedHeadline = NULL WHERE id = :id")
     suspend fun setHeadline(id: Long, headline: String)
 }
 
-@Database(entities = [Scan::class], version = 4, exportSchema = true)
+@Database(entities = [Scan::class], version = 5, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun scanDao(): ScanDao
 
@@ -107,9 +113,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v5 adds translated headlines. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE scans ADD COLUMN translatedHeadline TEXT")
+            }
+        }
+
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "tour.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
     }
 }

@@ -1,0 +1,107 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 5,
+    "identityHash": "f5c170bde90130691be83712b8baaf25",
+    "entities": [
+      {
+        "tableName": "scans",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `text` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `latitude` REAL, `longitude` REAL, `placeName` TEXT, `languageTag` TEXT, `thumbnail` TEXT, `favorite` INTEGER NOT NULL DEFAULT 0, `translation` TEXT, `translationTag` TEXT, `languages` TEXT, `languageFixed` INTEGER NOT NULL DEFAULT 0, `headline` TEXT, `translatedHeadline` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "text",
+            "columnName": "text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latitude",
+            "columnName": "latitude",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "longitude",
+            "columnName": "longitude",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "placeName",
+            "columnName": "placeName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "languageTag",
+            "columnName": "languageTag",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "thumbnail",
+            "columnName": "thumbnail",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "favorite",
+            "columnName": "favorite",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "translation",
+            "columnName": "translation",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "translationTag",
+            "columnName": "translationTag",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "languages",
+            "columnName": "languages",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "languageFixed",
+            "columnName": "languageFixed",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "headline",
+            "columnName": "headline",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "translatedHeadline",
+            "columnName": "translatedHeadline",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'f5c170bde90130691be83712b8baaf25')"
+    ]
+  }
+}

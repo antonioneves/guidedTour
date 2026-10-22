@@ -131,6 +131,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         // Off the main thread: reaching AICore can block, above all on phones without it.
         viewModelScope.launch(Dispatchers.Default) { writeHeadlines() }
         viewModelScope.launch { keepBackedUp() }
+        viewModelScope.launch(Dispatchers.Default) { translateHeadlines() }
     }
 
     /**
@@ -516,13 +517,39 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
             val target = Translator.target(settings.translateTo.value)
             when (val result = Translator.translate(scan.text, scan.spans(), target)) {
                 is Translator.Result.Success -> {
-                    dao.setTranslation(scan.id, result.text, target)
-                    val withTranslation = scan.copy(translation = result.text, translationTag = target)
+                    val headline = scan.headline?.let { translatedHeadline(it, scan, target) }
+                    dao.setTranslation(scan.id, result.text, target, headline)
+                    val withTranslation = scan.copy(translation = result.text, translationTag = target, translatedHeadline = headline)
                     if (player.value.active) addToQueue(withTranslation, translated = true) else playNow(withTranslation, translated = true)
                 }
                 is Translator.Result.Failure -> _messages.tryEmit(result.message)
             }
             _translating.value -= scan.id
+        }
+    }
+
+    /** [headline] of [scan] in [target], or null if it can't be translated now. */
+    private suspend fun translatedHeadline(headline: String, scan: Scan, target: String): String? =
+        (Translator.translate(headline, scan.languageTag, target) as? Translator.Result.Success)?.text?.trim()?.takeIf { it.isNotEmpty() }
+
+    /**
+     * Translates the headlines of translated guides that don't have theirs in the translation's
+     * language yet: written after the translation, changed, or translated before headlines were.
+     * Each is tried once a session.
+     */
+    private suspend fun translateHeadlines() {
+        delay(5_000)
+        val tried = mutableSetOf<Pair<Long, String>>()
+        // Not collectLatest: a translation under way finishes before the next list is looked at.
+        loadedScans.filterNotNull().collect { scans ->
+            for (scan in scans) {
+                val headline = scan.headline ?: continue
+                val tag = scan.translationTag ?: continue
+                if (scan.translation == null || scan.translatedHeadline != null || !tried.add(scan.id to headline)) continue
+                val translated = translatedHeadline(headline, scan, tag)
+                if (translated != null) dao.setTranslatedHeadline(scan.id, translated)
+                android.util.Log.i("GuidedTour", "headline: scan ${scan.id} " + if (translated != null) "translated" else "not translated")
+            }
         }
     }
 
