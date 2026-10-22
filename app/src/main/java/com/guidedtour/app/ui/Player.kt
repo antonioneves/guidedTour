@@ -21,6 +21,24 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.gestures.detectDragGestures
+import android.Manifest
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animate
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import com.guidedtour.app.data.saveToGallery
+import com.guidedtour.app.data.savingNeedsPermission
+import kotlin.math.abs
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.foundation.Image
@@ -180,22 +198,43 @@ fun Thumbnail(path: String?, modifier: Modifier = Modifier, maxSide: Int = 480, 
     }
 }
 
-/** The saved photo full screen: pinch or double-tap to zoom, drag to move, back or ✕ to close. */
+/**
+ * The saved photo full screen: pinch or double-tap to zoom, drag to move, drag down (unzoomed),
+ * back or ✕ to close; the save button copies it into the phone's gallery.
+ */
 @Composable
 fun PhotoViewer(path: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     var size by remember { mutableStateOf(IntSize.Zero) }
+    // How far the photo has been dragged down to close it.
+    var drop by remember { mutableFloatStateOf(0f) }
+    var saving by remember { mutableStateOf(false) }
+    var saved by remember { mutableStateOf(false) }
+    fun save() {
+        saving = true
+        scope.launch {
+            saved = saveToGallery(context, path)
+            saving = false
+            Toast.makeText(context, if (saved) "Saved to Pictures/Guided Tour" else "Couldn't save the photo", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) save() else Toast.makeText(context, "Saving needs access to the phone's storage", Toast.LENGTH_SHORT).show()
+    }
     // Keep the zoomed photo covering the screen instead of sliding off it.
     fun clamp(o: Offset, s: Float) = Offset(
         o.x.coerceIn(-(s - 1) * size.width / 2, (s - 1) * size.width / 2),
         o.y.coerceIn(-(s - 1) * size.height / 2, (s - 1) * size.height / 2),
     )
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val fade = if (size.height > 0) 1f - (drop / size.height * 2f).coerceIn(0f, 0.8f) else 1f
         Box(
             Modifier
                 .fillMaxSize()
-                .background(Color.Black)
+                .background(Color.Black.copy(alpha = fade))
                 .onSizeChanged { size = it }
                 .pointerInput(Unit) {
                     detectTapGestures(onDoubleTap = {
@@ -203,9 +242,35 @@ fun PhotoViewer(path: String, onDismiss: () -> Unit) {
                     })
                 }
                 .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(1f, 6f)
-                        offset = clamp(offset + pan, scale)
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        val velocity = VelocityTracker()
+                        // Unzoomed, one finger moving mostly down drags the photo away instead.
+                        var dropping = false
+                        var decided = false
+                        do {
+                            val event = awaitPointerEvent()
+                            val zoom = event.calculateZoom()
+                            val pan = event.calculatePan()
+                            val fingers = event.changes.count { it.pressed }
+                            if (!decided && pan != Offset.Zero) {
+                                decided = true
+                                dropping = scale == 1f && fingers == 1 && pan.y > abs(pan.x)
+                            }
+                            if (dropping && fingers == 1) {
+                                drop = (drop + pan.y).coerceAtLeast(0f)
+                                event.changes.firstOrNull { it.pressed }?.let { velocity.addPosition(it.uptimeMillis, it.position) }
+                            } else if (!dropping) {
+                                scale = (scale * zoom).coerceIn(1f, 6f)
+                                offset = clamp(offset + pan, scale)
+                            }
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        } while (event.changes.any { it.pressed })
+                        if (dropping) {
+                            val flung = velocity.calculateVelocity().y > 1_500f
+                            if (flung || drop > size.height * 0.2f) onDismiss()
+                            else scope.launch { animate(drop, 0f) { value, _ -> drop = value } }
+                        }
                     }
                 },
             contentAlignment = Alignment.Center,
@@ -216,16 +281,29 @@ fun PhotoViewer(path: String, onDismiss: () -> Unit) {
                     scaleX = scale
                     scaleY = scale
                     translationX = offset.x
-                    translationY = offset.y
+                    translationY = offset.y + drop
                 },
                 maxSide = 2048,
                 contentScale = ContentScale.Fit,
             )
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(8.dp),
-                colors = IconButtonDefaults.iconButtonColors(containerColor = Color.Black.copy(alpha = 0.5f), contentColor = Color.White),
-            ) { Icon(Icons.Filled.Close, "Close photo") }
+            val buttons = IconButtonDefaults.iconButtonColors(
+                containerColor = Color.Black.copy(alpha = 0.5f),
+                contentColor = Color.White,
+                disabledContainerColor = Color.Black.copy(alpha = 0.5f),
+                disabledContentColor = Color.White.copy(alpha = 0.7f),
+            )
+            Row(Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(8.dp).graphicsLayer { alpha = fade }, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                IconButton(
+                    onClick = {
+                        val granted = !savingNeedsPermission ||
+                            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+                        if (granted) save() else permission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    },
+                    enabled = !saving && !saved,
+                    colors = buttons,
+                ) { Icon(if (saved) Icons.Filled.Check else Icons.Filled.Download, if (saved) "Saved to the gallery" else "Save to the gallery") }
+                IconButton(onClick = onDismiss, colors = buttons) { Icon(Icons.Filled.Close, "Close photo") }
+            }
         }
     }
 }
