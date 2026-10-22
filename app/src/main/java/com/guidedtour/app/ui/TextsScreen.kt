@@ -84,6 +84,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.TextStyle
@@ -388,7 +397,8 @@ private fun ScanCard(
     )
     Card(
         colors = CardDefaults.cardColors(containerColor = container),
-        modifier = modifier.fillMaxWidth().animateContentSize().clickable(onClickLabel = if (expanded) "Collapse" else "Expand") { expanded = !expanded },
+        // No animateContentSize: the opened text grows in by itself (see AnimatedVisibility below), and both at once judder.
+        modifier = modifier.fillMaxWidth().clickable(onClickLabel = if (expanded) "Collapse" else "Expand") { expanded = !expanded },
     ) {
         Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -473,25 +483,36 @@ private fun ScanCard(
             val extras = listOfNotNull(if (queued) "In queue" else null, if (translating) "Translating…" else null).joinToString(" · ")
             LookaheadScope {
                 val lookahead = this
+                // Small and grey under the title; full size, in colour, heading its text: growing as it moves.
                 val movingLabel = remember(scan.id) {
-                    movableContentOf { text: String, primary: Boolean ->
+                    movableContentOf { text: String, heading: Boolean ->
+                        val size by animateFloatAsState(if (heading) 14f else 11f, tween(LABEL_MOVE_MS), label = "label size")
+                        val color by animateColorAsState(
+                            if (heading) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tween(LABEL_MOVE_MS),
+                            label = "label colour",
+                        )
                         Text(
                             text,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (primary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.animateBounds(lookahead),
+                            style = MaterialTheme.typography.labelMedium.copy(fontSize = size.sp, lineHeight = (size + 4).sp),
+                            color = color,
+                            modifier = Modifier.animateBounds(lookahead, boundsTransform = { _, _ -> tween(LABEL_MOVE_MS) }),
                         )
                     }
                 }
                 val slides = expanded && translation != null
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // Top aligned, so the photo stays where it is while the text beside it changes.
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
                         Thumbnail(
                             scan.thumbnail,
                             Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "View photo") { viewing = true },
                             maxSide = 256,
                         )
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Column(
+                            Modifier.weight(1f).heightIn(min = 56.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
+                        ) {
                             if (title != null) {
                                 Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             } else if (!expanded) {
@@ -502,34 +523,48 @@ private fun ScanCard(
                                 Text(extras, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
-                        ListenButton(scan, player, translating, target, viewModel, useTranslation) { useTranslation = it }
-                    }
-                    if (expanded) {
-                        @Composable
-                        fun Version(heading: String?, otherTitle: String?, text: String, reading: Boolean, primary: Boolean, style: TextStyle) {
-                            Column(Modifier.padding(top = 4.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                if (heading != null) {
-                                    if (primary) movingLabel(heading, true)
-                                    else Text(heading, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                                }
-                                // The other version's own title, unless it's printed as the text's first line.
-                                if (otherTitle != null && otherTitle != title && !text.startsWith(otherTitle, ignoreCase = true)) {
-                                    Text(otherTitle, style = MaterialTheme.typography.titleSmall)
-                                }
-                                HighlightedText(text, if (reading) player.highlight else null, style)
-                            }
+                        Box(Modifier.height(56.dp), contentAlignment = Alignment.Center) {
+                            ListenButton(scan, player, translating, target, viewModel, useTranslation) { useTranslation = it }
                         }
-                        val originalReading = current?.translated == false
-                        val translationReading = current?.translated == true
-                        when {
-                            translation == null -> Version(null, null, scan.text, originalReading, true, MaterialTheme.typography.bodyLarge)
-                            translated -> {
-                                Version(translationLabel, null, translation, translationReading, true, MaterialTheme.typography.bodyLarge)
-                                Version(originalLabel, scan.headline, scan.text, originalReading, false, MaterialTheme.typography.bodyMedium)
+                    }
+                    AnimatedVisibility(
+                        visible = expanded,
+                        enter = fadeIn(tween(LABEL_MOVE_MS)) + expandVertically(tween(LABEL_MOVE_MS), expandFrom = Alignment.Top),
+                        exit = fadeOut(tween(LABEL_MOVE_MS / 2)) + shrinkVertically(tween(LABEL_MOVE_MS), shrinkTowards = Alignment.Top),
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            @Composable
+                            fun Version(heading: String?, otherTitle: String?, text: String, reading: Boolean, primary: Boolean, style: TextStyle) {
+                                // The second version a little apart from the first.
+                                Column(Modifier.padding(top = if (primary) 4.dp else 16.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    val headingStyle = MaterialTheme.typography.labelMedium.copy(fontSize = 14.sp, lineHeight = 18.sp)
+                                    if (heading != null) {
+                                        when {
+                                            primary && slides -> movingLabel(heading, true)
+                                            // Closing: the label is already on its way back up; its place stays while the text goes.
+                                            primary -> Text(heading, style = headingStyle, modifier = Modifier.alpha(0f))
+                                            else -> Text(heading, style = headingStyle, color = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                    // The other version's own title, unless it's printed as the text's first line.
+                                    if (otherTitle != null && otherTitle != title && !text.startsWith(otherTitle, ignoreCase = true)) {
+                                        Text(otherTitle, style = MaterialTheme.typography.titleSmall)
+                                    }
+                                    HighlightedText(text, if (reading) player.highlight else null, style)
+                                }
                             }
-                            else -> {
-                                Version(originalLabel, null, scan.text, originalReading, true, MaterialTheme.typography.bodyLarge)
-                                Version(translationLabel, scan.translatedHeadline, translation, translationReading, false, MaterialTheme.typography.bodyMedium)
+                            val originalReading = current?.translated == false
+                            val translationReading = current?.translated == true
+                            when {
+                                translation == null -> Version(null, null, scan.text, originalReading, true, MaterialTheme.typography.bodyLarge)
+                                translated -> {
+                                    Version(translationLabel, null, translation, translationReading, true, MaterialTheme.typography.bodyLarge)
+                                    Version(originalLabel, scan.headline, scan.text, originalReading, false, MaterialTheme.typography.bodyMedium)
+                                }
+                                else -> {
+                                    Version(originalLabel, null, scan.text, originalReading, true, MaterialTheme.typography.bodyLarge)
+                                    Version(translationLabel, scan.translatedHeadline, translation, translationReading, false, MaterialTheme.typography.bodyMedium)
+                                }
                             }
                         }
                     }
@@ -563,6 +598,9 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 }
 
 private const val HIGHLIGHT_MS = 3000L
+
+/** How long a card takes to open or close, and its language label to move. */
+private const val LABEL_MOVE_MS = 300
 
 /** Every label Listen can show, to size it for the widest. */
 private val LISTEN_LABELS = listOf("Listen", "Pause", "Resume")
