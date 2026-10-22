@@ -413,7 +413,11 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         // Never ask for a combination the camera can't do, even for a moment: into night mode without
         // frame analysis, analysis off first; out of it, the camera first, then analysis back on. (A
         // failed combination leaves the camera closed.)
-        val switched = runCatching {
+        val before = controller.cameraInfo
+        val changes = controller.cameraSelector != selector
+        // Quick taps on the night chip would open and close the camera faster than it can follow.
+        delay(250)
+        var switched = runCatching {
             if (nightSelector != null) {
                 controller.setEnabledUseCases(cases)
                 controller.cameraSelector = selector
@@ -422,12 +426,28 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                 controller.setEnabledUseCases(cases)
             }
         }.onFailure { Log.w(TAG, "camera: can't switch to ${chosen.label}${if (nightOn) " in night mode" else ""}", it) }.isSuccess
+        // The phone can also refuse after the call has returned (the camera then closes with an error):
+        // a new camera that isn't open a few seconds later is given up.
+        if (switched && changes) {
+            var opened = false
+            for (i in 0 until 120) {
+                val info = controller.cameraInfo
+                val camera = if (info != null && info !== before) info.cameraState.value else null
+                if (camera?.type == androidx.camera.core.CameraState.Type.OPEN) { opened = true; break }
+                if (camera?.error != null) {
+                    Log.w(TAG, "camera: ${chosen.label}${if (nightOn) " in night mode" else ""} closed with ${camera.error}")
+                    break
+                }
+                delay(50)
+            }
+            if (!opened) switched = false
+        }
         if (!switched) {
             // Back to a combination that works: this lens without night mode, the camera restarted.
             runCatching {
-                if (controller.cameraSelector != chosen.selector) controller.cameraSelector = chosen.selector
-                controller.setEnabledUseCases(CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE)
                 controller.unbind()
+                controller.cameraSelector = chosen.selector
+                controller.setEnabledUseCases(CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE)
                 controller.bindToLifecycle(lifecycleOwner)
             }.onFailure { Log.w(TAG, "camera: can't restart", it) }
             if (nightOn) {
