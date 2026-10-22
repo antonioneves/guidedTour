@@ -75,7 +75,7 @@ class TextFramesTest {
         // Missed for one frame: still there, then found again with the same id.
         assertEquals(id, tracker.update(emptyList()).single().id)
         assertEquals(id, tracker.update(listOf(frame(125f, 112f))).single().id)
-        repeat(4) { tracker.update(emptyList()) }
+        repeat(7) { tracker.update(emptyList()) }
         assertTrue(tracker.frames.isEmpty())
     }
 
@@ -84,20 +84,20 @@ class TextFramesTest {
         tracker.update(listOf(frame(100f, 100f, suggested = true)))
         tracker.update(listOf(frame(100f, 100f, suggested = false)))
         assertTrue(tracker.frames.single().included)
-        repeat(3) { tracker.update(listOf(frame(100f, 100f, suggested = false))) }
+        repeat(6) { tracker.update(listOf(frame(100f, 100f, suggested = false))) }
         assertFalse(tracker.frames.single().included)
     }
 
     @Test fun tapTogglesTheFrameUnderIt() {
         val tracker = FrameTracker()
-        repeat(2) { tracker.update(listOf(frame(100f, 100f), frame(700f, 100f, suggested = false))) }
+        repeat(3) { tracker.update(listOf(frame(100f, 100f), frame(700f, 100f, suggested = false))) }
         assertTrue(tracker.toggleAt(800f, 150f))
         assertTrue(tracker.frames.all { it.included })
         assertTrue(tracker.toggleAt(150f, 150f))
         assertFalse(tracker.frames.single { it.left < 500 }.included)
         assertFalse(tracker.toggleAt(1400f, 900f))
         // The choice outlasts the suggestion changing.
-        repeat(4) { tracker.update(listOf(frame(100f, 100f), frame(700f, 100f, suggested = false))) }
+        repeat(7) { tracker.update(listOf(frame(100f, 100f), frame(700f, 100f, suggested = false))) }
         assertFalse(tracker.frames.single { it.left < 500 }.included)
     }
 
@@ -142,5 +142,25 @@ class TextFramesTest {
         // The text now reads as a frame elsewhere on top of the old place, too far to be matched to it.
         val tracked = tracker.update(listOf(TextFrame(300f, 120f, 900f, 260f, listOf(block("far", 300, 120)), true)))
         assertTrue(tracked.none { it.left < 200 })
+    }
+
+    @Test fun aSteadyFrameHoldsStillThroughJitter() {
+        val tracker = FrameTracker()
+        repeat(8) { tracker.update(listOf(frame(100f, 100f))) }
+        val still = tracker.frames.single().let { it.left to it.top }
+        // A few pixels either way, as ML Kit's readings wobble.
+        repeat(10) { i -> tracker.update(listOf(frame(100f + (i % 3) * 8f, 100f + (i % 2) * 8f))) }
+        assertEquals(still, tracker.frames.single().let { it.left to it.top })
+    }
+
+    @Test fun aSteadyFrameFollowsTheTextOnceItClearlyMovedAway() {
+        val tracker = FrameTracker()
+        repeat(8) { tracker.update(listOf(frame(100f, 100f))) }
+        val id = tracker.frames.single().id
+        repeat(5) { tracker.update(listOf(frame(260f, 100f))) }
+        repeat(10) { tracker.update(listOf(frame(260f, 100f))) }
+        val moved = tracker.frames.single()
+        assertEquals(id, moved.id)
+        assertTrue(moved.left > 240f)
     }
 }

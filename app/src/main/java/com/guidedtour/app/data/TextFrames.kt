@@ -1,5 +1,6 @@
 package com.guidedtour.app.data
 
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -137,6 +138,10 @@ class FrameTracker {
         var seen = 1
         internal var missed = 0
         internal var disagree = 0
+        /** Frames running its place has hardly changed; once it's [LOCK]ed it holds still. */
+        internal var calm = 0
+        /** Frames running the text has been somewhere else than a locked frame. */
+        internal var drift = 0
         val included: Boolean get() = choice ?: suggested
         /** Seen in a few frames running: worth showing. */
         val shown: Boolean get() = seen >= SHOW_AFTER
@@ -159,10 +164,7 @@ class FrameTracker {
             }
             unmatched -= match
             match.frame = frame
-            match.left += (frame.left - match.left) * GLIDE
-            match.top += (frame.top - match.top) * GLIDE
-            match.right += (frame.right - match.right) * GLIDE
-            match.bottom += (frame.bottom - match.bottom) * GLIDE
+            follow(match, frame)
             match.seen++
             match.missed = 0
             if (frame.suggested != match.suggested) {
@@ -179,6 +181,27 @@ class FrameTracker {
         }
         frames = withoutDuplicates(next)
         return frames
+    }
+
+    /**
+     * Moves [tracked] towards [frame]: gliding while it settles; once its place has held (the camera
+     * is steady) it stays put through small changes, and only moves when the text is clearly
+     * elsewhere for a few frames running.
+     */
+    private fun follow(tracked: Tracked, frame: TextFrame) {
+        val size = max(tracked.right - tracked.left, tracked.bottom - tracked.top).coerceAtLeast(1f)
+        val shift = maxOf(abs(frame.left - tracked.left), abs(frame.top - tracked.top), abs(frame.right - tracked.right), abs(frame.bottom - tracked.bottom)) / size
+        if (tracked.calm >= LOCK) {
+            if (shift < MOVE_AWAY) { tracked.drift = 0; return }
+            if (++tracked.drift < MOVE_AFTER) return
+            tracked.calm = 0
+            tracked.drift = 0
+        }
+        tracked.calm = if (shift < HOLD) tracked.calm + 1 else 0
+        tracked.left += (frame.left - tracked.left) * GLIDE
+        tracked.top += (frame.top - tracked.top) * GLIDE
+        tracked.right += (frame.right - tracked.right) * GLIDE
+        tracked.bottom += (frame.bottom - tracked.bottom) * GLIDE
     }
 
     /** Includes or skips the frame at ([x], [y]); false if there's none there. */
@@ -229,9 +252,17 @@ class FrameTracker {
 
     private companion object {
         const val MATCH_OVERLAP = 0.25f
-        const val GLIDE = 0.5f
-        const val KEEP_UNSEEN = 3
-        const val SETTLE = 3
-        const val SHOW_AFTER = 2
+        const val GLIDE = 0.3f
+        const val KEEP_UNSEEN = 6
+        const val SETTLE = 6
+        const val SHOW_AFTER = 3
+        /** A shift under this share of the frame's size counts as calm. */
+        const val HOLD = 0.05f
+        /** Calm frames running before a frame locks. */
+        const val LOCK = 4
+        /** A locked frame moves only for a shift over this share of its size... */
+        const val MOVE_AWAY = 0.12f
+        /** ...that lasts this many frames. */
+        const val MOVE_AFTER = 5
     }
 }
