@@ -66,8 +66,6 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.SplitButtonDefaults
-import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -84,6 +82,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.AnimationVector2D
@@ -423,6 +422,7 @@ private fun ScanCard(
                 )
                 Text(scan.timeLabel(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FavoriteButton(scan) { viewModel.toggleFavorite(scan) }
+                TranslateButton(scan, translating, target, useTranslation, { useTranslation = it }, viewModel)
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More actions") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -552,7 +552,7 @@ private fun ScanCard(
                             }
                         }
                         Box(Modifier.height(56.dp), contentAlignment = Alignment.Center) {
-                            ListenButton(scan, player, translating, target, viewModel, useTranslation) { useTranslation = it }
+                            ListenButton(scan, player, viewModel, useTranslation)
                         }
                     }
                     // The first version's label, outside the fading text so it stays in sight all the way down.
@@ -675,39 +675,20 @@ private fun ReadingCard(modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * Plays or pauses the scan. When it has (or can have) a translation, it is a split button: the
- * arrow picks the original, the translation, or translating into [target]; picking one plays it.
- * [useTranslation] (the card's, which names the language beside it) says which one it plays.
- */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+/** Plays or pauses the scan, in the version the card shows: the translation when [useTranslation] and there is one. */
 @Composable
-private fun ListenButton(
-    scan: Scan,
-    player: PlayerState,
-    translating: Boolean,
-    target: String,
-    viewModel: TourViewModel,
-    useTranslation: Boolean,
-    onUseTranslation: (Boolean) -> Unit,
-) {
+private fun ListenButton(scan: Scan, player: PlayerState, viewModel: TourViewModel, useTranslation: Boolean) {
     val current = player.current?.takeIf { it.id == scan.id }
     val playing = current != null && player.playing
-    val translatable = Translator.needsTranslation(scan.allLanguages(), target)
-    val hasTranslation = scan.translation != null
-    var menu by remember { mutableStateOf(false) }
-
-    fun play(translated: Boolean) {
-        onUseTranslation(translated)
-        if (current != null && current.translated == translated) viewModel.togglePlayback() else viewModel.playNow(scan, translated)
-    }
-    // The language it reads in is named beside it, on the card.
+    val translated = useTranslation && scan.translation != null
     val label = when {
         playing -> "Pause"
         current != null -> "Resume"
         else -> "Listen"
     }
-    val content: @Composable RowScope.() -> Unit = {
+    FilledTonalButton(onClick = {
+        if (current != null && current.translated == translated) viewModel.togglePlayback() else viewModel.playNow(scan, translated)
+    }) {
         Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(ButtonDefaults.IconSize))
         Spacer(Modifier.size(ButtonDefaults.IconSpacing))
         // As wide as its widest label, so the button keeps its size between Listen, Pause and Resume.
@@ -716,48 +697,39 @@ private fun ListenButton(
             Text(label, maxLines = 1)
         }
     }
-    if (!hasTranslation && !translatable) {
-        FilledTonalButton(onClick = { play(false) }, content = content)
-        return
-    }
-    Box {
-        SplitButtonLayout(
-            leadingButton = {
-                SplitButtonDefaults.TonalLeadingButton(onClick = {
-                    if (current != null) viewModel.togglePlayback() else play(useTranslation && hasTranslation)
-                }, content = content)
-            },
-            trailingButton = {
-                SplitButtonDefaults.TonalTrailingButton(
-                    checked = menu,
-                    onCheckedChange = { menu = it },
-                    modifier = Modifier.semantics { contentDescription = "Choose original or translation" },
-                ) {
-                    Icon(Icons.Filled.KeyboardArrowDown, null, Modifier.size(SplitButtonDefaults.TrailingIconSize))
-                }
-            },
-        )
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(
-                text = { Text("Original" + (scan.languageLabel()?.let { " · $it" } ?: "")) },
-                leadingIcon = { if (!useTranslation || !hasTranslation) Icon(Icons.Filled.Check, null) },
-                onClick = { menu = false; play(false) },
+}
+
+/**
+ * Translation for the card's top row: with a translation, switches the card (its title, language
+ * and what Listen reads) between it and the original, highlighted while it shows the translation;
+ * without one, translates into [target]. Not shown for a text already in [target].
+ */
+@Composable
+private fun TranslateButton(scan: Scan, translating: Boolean, target: String, useTranslation: Boolean, onUseTranslation: (Boolean) -> Unit, viewModel: TourViewModel) {
+    val hasTranslation = scan.translation != null
+    if (!hasTranslation && !Translator.needsTranslation(scan.allLanguages(), target)) return
+    val showing = useTranslation && hasTranslation
+    IconButton(
+        onClick = {
+            when {
+                hasTranslation -> onUseTranslation(!showing)
+                !translating -> { onUseTranslation(true); viewModel.translate(scan) }
+            }
+        },
+        enabled = hasTranslation || !translating,
+    ) {
+        if (translating && !hasTranslation) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(
+                Icons.Filled.Translate,
+                when {
+                    !hasTranslation -> "Translate into ${Translator.nameOf(target)}"
+                    showing -> "Show the original"
+                    else -> "Show the translation"
+                },
+                tint = if (showing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (hasTranslation) {
-                DropdownMenuItem(
-                    text = { Text("Translation" + (scan.translationTag?.let { " · ${Translator.nameOf(it)}" } ?: "")) },
-                    leadingIcon = { if (useTranslation) Icon(Icons.Filled.Check, null) },
-                    onClick = { menu = false; play(true) },
-                )
-            }
-            if (translatable && scan.translationTag != target) {
-                DropdownMenuItem(
-                    text = { Text(if (translating) "Translating…" else "Translate into ${Translator.nameOf(target)}") },
-                    leadingIcon = { Icon(Icons.Filled.Translate, null) },
-                    enabled = !translating,
-                    onClick = { menu = false; onUseTranslation(true); viewModel.translate(scan) },
-                )
-            }
         }
     }
 }
