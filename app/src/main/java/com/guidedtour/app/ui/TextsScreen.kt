@@ -84,6 +84,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.animation.core.VectorConverter
+import androidx.compose.animation.core.AnimationVector2D
+import androidx.compose.ui.unit.round
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.layout.approachLayout
+import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.EaseInOutCubic
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.unit.sp
@@ -96,7 +107,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.animation.animateBounds
 import androidx.compose.ui.layout.LookaheadScope
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.ui.draw.rotate
@@ -486,17 +496,35 @@ private fun ScanCard(
                 // Small and grey under the title; full size, in colour, heading its text: growing as it moves.
                 val movingLabel = remember(scan.id) {
                     movableContentOf { text: String, heading: Boolean ->
-                        val size by animateFloatAsState(if (heading) 14f else 11f, tween(LABEL_MOVE_MS), label = "label size")
+                        // Laid out at its new size at once and scaled from the old one, and only its position
+                        // animated: no text measured every frame, and never squeezed (which cut its last word off).
+                        val size = if (heading) HEADING_SP else SMALL_SP
+                        val scale = remember { Animatable(1f) }
+                        var shown by remember { mutableStateOf(heading) }
+                        LaunchedEffect(heading) {
+                            if (shown == heading) return@LaunchedEffect
+                            shown = heading
+                            scale.snapTo(if (heading) SMALL_SP / HEADING_SP else HEADING_SP / SMALL_SP)
+                            scale.animateTo(1f, soft())
+                        }
                         val color by animateColorAsState(
                             if (heading) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            tween(LABEL_MOVE_MS),
+                            soft(),
                             label = "label colour",
                         )
                         Text(
                             text,
                             style = MaterialTheme.typography.labelMedium.copy(fontSize = size.sp, lineHeight = (size + 4).sp),
                             color = color,
-                            modifier = Modifier.animateBounds(lookahead, boundsTransform = { _, _ -> tween(LABEL_MOVE_MS) }),
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier
+                                .animatePlacement(lookahead)
+                                .graphicsLayer {
+                                    scaleX = scale.value
+                                    scaleY = scale.value
+                                    transformOrigin = TransformOrigin(0f, 0f)
+                                },
                         )
                     }
                 }
@@ -527,24 +555,25 @@ private fun ScanCard(
                             ListenButton(scan, player, translating, target, viewModel, useTranslation) { useTranslation = it }
                         }
                     }
+                    // The first version's label, outside the fading text so it stays in sight all the way down.
+                    if (slides && label != null) Box(Modifier.padding(top = 4.dp)) { movingLabel(label, true) }
                     AnimatedVisibility(
                         visible = expanded,
-                        enter = fadeIn(tween(LABEL_MOVE_MS)) + expandVertically(tween(LABEL_MOVE_MS), expandFrom = Alignment.Top),
-                        exit = fadeOut(tween(LABEL_MOVE_MS / 2)) + shrinkVertically(tween(LABEL_MOVE_MS), shrinkTowards = Alignment.Top),
+                        enter = fadeIn(soft()) + expandVertically(soft(), expandFrom = Alignment.Top),
+                        exit = fadeOut(soft()) + shrinkVertically(soft(), shrinkTowards = Alignment.Top),
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             @Composable
                             fun Version(heading: String?, otherTitle: String?, text: String, reading: Boolean, primary: Boolean, style: TextStyle) {
                                 // The second version a little apart from the first.
-                                Column(Modifier.padding(top = if (primary) 4.dp else 16.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    val headingStyle = MaterialTheme.typography.labelMedium.copy(fontSize = 14.sp, lineHeight = 18.sp)
-                                    if (heading != null) {
-                                        when {
-                                            primary && slides -> movingLabel(heading, true)
-                                            // Closing: the label is already on its way back up; its place stays while the text goes.
-                                            primary -> Text(heading, style = headingStyle, modifier = Modifier.alpha(0f))
-                                            else -> Text(heading, style = headingStyle, color = MaterialTheme.colorScheme.primary)
-                                        }
+                                Column(Modifier.padding(top = if (primary) 0.dp else 16.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    // The first version's heading is the moving label above.
+                                    if (heading != null && !primary) {
+                                        Text(
+                                            heading,
+                                            style = MaterialTheme.typography.labelMedium.copy(fontSize = HEADING_SP.sp, lineHeight = (HEADING_SP + 4).sp),
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
                                     }
                                     // The other version's own title, unless it's printed as the text's first line.
                                     if (otherTitle != null && otherTitle != title && !text.startsWith(otherTitle, ignoreCase = true)) {
@@ -599,8 +628,14 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 
 private const val HIGHLIGHT_MS = 3000L
 
-/** How long a card takes to open or close, and its language label to move. */
-private const val LABEL_MOVE_MS = 300
+/** How long a card takes to open or close, and its language label to move: easing in and out. */
+private const val LABEL_MOVE_MS = 400
+
+private fun <T> soft() = tween<T>(LABEL_MOVE_MS, easing = EaseInOutCubic)
+
+/** The language label's size under the title, and heading its text. */
+private const val SMALL_SP = 11f
+private const val HEADING_SP = 14f
 
 /** Every label Listen can show, to size it for the widest. */
 private val LISTEN_LABELS = listOf("Listen", "Pause", "Resume")
@@ -727,3 +762,31 @@ private fun ListenButton(
     }
 }
 
+/**
+ * Moves this to where it's placed in [scope] smoothly (see [soft]) instead of jumping there, as
+ * Compose's LookaheadScope sample does: only its position animates, it's measured as it is.
+ */
+private fun Modifier.animatePlacement(scope: LookaheadScope): Modifier = composed {
+    val coroutines = rememberCoroutineScope()
+    var animation by remember { mutableStateOf<Animatable<IntOffset, AnimationVector2D>?>(null) }
+    this.approachLayout(
+        isMeasurementApproachInProgress = { false },
+        isPlacementApproachInProgress = { animation?.isRunning == true },
+    ) { measurable, constraints ->
+        val placeable = measurable.measure(constraints)
+        layout(placeable.width, placeable.height) {
+            val coordinates = coordinates
+            if (coordinates == null) {
+                placeable.place(0, 0)
+                return@layout
+            }
+            with(scope) {
+                val target = lookaheadScopeCoordinates.localLookaheadPositionOf(coordinates).round()
+                val current = animation ?: Animatable(target, IntOffset.VectorConverter).also { animation = it }
+                if (current.targetValue != target) coroutines.launch { current.animateTo(target, soft()) }
+                val placed = lookaheadScopeCoordinates.localPositionOf(coordinates, Offset.Zero).round()
+                placeable.place(current.value - placed)
+            }
+        }
+    }
+}
