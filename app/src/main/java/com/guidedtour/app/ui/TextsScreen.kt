@@ -293,7 +293,7 @@ private fun VisitHeader(
     }
     if (photo != null) {
         // The place's photo behind its name, white on the photo's darkened bottom.
-        PlacePhotoBanner(photo, modifier.padding(top = 8.dp).clip(MaterialTheme.shapes.large).then(toggle).then(state)) {
+        PlacePhotoBanner(photo, modifier.padding(top = 8.dp).clip(MaterialTheme.shapes.large).then(toggle).then(state), height = VISIT_PHOTO_HEIGHT) {
             // In the top left corner, on a dark disc like the photo's credit opposite.
             if (onToggle != null) {
                 Box(
@@ -523,6 +523,9 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 }
 
 private const val HIGHLIGHT_MS = 3000L
+
+/** A visit header's photo: low, so a list of closed visits stays short. */
+private val VISIT_PHOTO_HEIGHT = 112.dp
 
 /** Position of [scanId] in the list: the search field first, then each visit's header and scans (all open). */
 private fun listIndexOf(visits: List<Visit>, scanId: Long): Int? {
