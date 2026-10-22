@@ -319,14 +319,13 @@ private fun VisitHeader(
         }
         return
     }
-    // No photo: a tonal banner shaped like the photo one, the arrow part of Play visit, as a split button.
+    // No photo: the name on the list's background, the arrow part of Play visit, as a split button.
     val colors = MaterialTheme.colorScheme
     Row(
-        modifier.fillMaxWidth().padding(top = 8.dp).clip(MaterialTheme.shapes.large).background(colors.surfaceContainerHighest)
-            .then(toggle).then(state).padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+        modifier.fillMaxWidth().padding(top = 8.dp).clip(MaterialTheme.shapes.medium).then(toggle).then(state).padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f).padding(start = 4.dp)) {
+        Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             Text(count, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
