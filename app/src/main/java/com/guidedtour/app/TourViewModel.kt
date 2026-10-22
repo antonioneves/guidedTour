@@ -12,6 +12,7 @@ import com.guidedtour.app.data.Accuracy
 import com.guidedtour.app.data.AiProofreader
 import com.guidedtour.app.data.CloudOcr
 import com.guidedtour.app.data.Headliner
+import com.guidedtour.app.data.printedTitle
 import com.guidedtour.app.data.WordLists
 import com.guidedtour.app.data.PhotoRegion
 import com.guidedtour.app.data.ViewArea
@@ -126,6 +127,7 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     /**
      * Gives each guide without one a headline for its card, one at a time, newest first: new scans,
      * edited texts, and ones saved before there were headlines. Each text is tried once a session.
+     * Guides with neither an AI headline nor a printed title keep showing their first lines.
      */
     private suspend fun writeHeadlines() {
         delay(3_000)
@@ -133,14 +135,15 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
         var scans = loadedScans.filterNotNull().first()
         while (true) {
             val next = scans.firstOrNull { it.headline == null && it.text.isNotBlank() && (it.id to it.text) !in tried }
-            if (next != null && Headliner.available()) {
+            if (next != null) {
                 tried += next.id to next.text
-                val headline = Headliner.headline(next.text, next.languageTag)
+                // Written by the phone's AI where it has one, or else the title printed on the plaque.
+                val headline = Headliner.headline(next.text, next.languageTag) ?: printedTitle(next.text)
                 if (headline != null) dao.setHeadline(next.id, headline)
                 android.util.Log.i("GuidedTour", "headline: scan ${next.id} " + if (headline != null) "written" else "not written")
             }
             val seen = scans
-            scans = if (next != null && (next.id to next.text) in tried) loadedScans.value ?: seen else loadedScans.filterNotNull().first { it != seen }
+            scans = if (next != null) loadedScans.value ?: seen else loadedScans.filterNotNull().first { it != seen }
         }
     }
     val scanTabVisible = MutableStateFlow(true)

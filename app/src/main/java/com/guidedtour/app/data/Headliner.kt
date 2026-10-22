@@ -57,3 +57,29 @@ internal fun cleanHeadline(answer: String): String? {
 
 /** Longer answers aren't headlines. */
 private const val MAX_HEADLINE = 70
+
+/**
+ * The title printed on the plaque, as a headline where the phone has no AI to write one: a short
+ * first paragraph (OCR reads a heading as its own block) with more text after it, that doesn't end
+ * like a sentence. Written in capitals, it's turned into title case. Null if the text has none.
+ */
+fun printedTitle(text: String): String? {
+    val paragraphs = paragraphsOf(text)
+    if (paragraphs.size < 2) return null
+    val first = paragraphs.first().replace(Regex("""\s+"""), " ").trim().trimEnd(':', '-', '–', '—').trim()
+    val words = first.split(' ')
+    if (first.length > MAX_TITLE || words.size > MAX_TITLE_WORDS || first.count(Char::isLetter) < 3) return null
+    if (first.last() in ".,;") return null
+    val letters = first.filter(Char::isLetter)
+    if (letters.isNotEmpty() && letters.all(Char::isUpperCase)) {
+        return words.mapIndexed { i, word ->
+            val lower = word.lowercase()
+            if (i > 0 && lower.count(Char::isLetter) <= 3) lower else lower.replaceFirstChar { it.titlecase() }
+        }.joinToString(" ")
+    }
+    return first
+}
+
+/** A printed title is at most this long, and this many words. */
+private const val MAX_TITLE = 60
+private const val MAX_TITLE_WORDS = 9

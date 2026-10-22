@@ -394,7 +394,10 @@ private fun ScanCard(
                 )
                 // A headline, where there is one, stands for the text until the card is opened.
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (scan.headline != null) Text(scan.headline, style = MaterialTheme.typography.titleMedium)
+                    // Opened, a printed title is already the text's first line.
+                    if (scan.headline != null && !(expanded && scan.text.startsWith(scan.headline, ignoreCase = true))) {
+                        Text(scan.headline, style = MaterialTheme.typography.titleMedium)
+                    }
                     if (scan.headline == null || expanded) {
                         HighlightedText(
                             scan.text,
