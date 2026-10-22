@@ -143,7 +143,7 @@ fun MapScreen(viewModel: TourViewModel) {
     // The place whose pin was tapped (by its first scan's id): its row is scrolled to and highlighted.
     var selected by remember { mutableStateOf<Long?>(null) }
     var showCredits by remember { mutableStateOf(false) }
-    // A tapped pin holding several texts (by its first scan's id): they're listed in a sheet.
+    // A tapped row, or pin holding several texts (by its first scan's id): its texts are listed in a sheet.
     var stack by remember { mutableStateOf<Long?>(null) }
     val listState = rememberLazyListState()
     val dark = isSystemInDarkTheme()
@@ -241,8 +241,8 @@ fun MapScreen(viewModel: TourViewModel) {
                     modifier = Modifier.padding(24.dp),
                 )
             } else {
-                // One row per place (like the pins), most recent first. Tapping a row moves the map
-                // there; its button plays the place's texts and shows whether they are playing.
+                // One row per place (like the pins), most recent first. Tapping a row lists its texts
+                // and moves the map there; its button plays them and shows whether they are playing.
                 // Space below the last row lets any row scroll to the top of the lowered sheet when its pin is tapped.
                 val screenHeight = LocalConfiguration.current.screenHeightDp.dp
                 LazyColumn(
@@ -258,6 +258,7 @@ fun MapScreen(viewModel: TourViewModel) {
                             viewModel,
                             highlighted = place.scans.first().id == selected,
                             onClick = {
+                                stack = place.scans.first().id
                                 scope.launch {
                                     sheetState.bottomSheetState.partialExpand()
                                     selected = null
@@ -348,7 +349,7 @@ private fun PlaceRow(place: Place, player: PlayerState, viewModel: TourViewModel
         colors = CardDefaults.elevatedCardColors(containerColor = if (active && photo == null) colors.primaryContainer else colors.surfaceContainerLow),
         modifier = Modifier.fillMaxWidth()
             .then(if (active || highlighted) Modifier.border(3.dp, colors.primary, CardDefaults.elevatedShape) else Modifier)
-            .semantics { onClick(label = "Show on the map") { onClick(); true } },
+            .semantics { onClick(label = "Show its texts") { onClick(); true } },
     ) {
         Box(Modifier.height(IntrinsicSize.Min)) {
             if (photo != null) {
@@ -506,14 +507,14 @@ private fun MapCredits(onDismiss: () -> Unit) {
 
 private val IMPROVE_MAP = Credit("Improve this map", "Report a mistake to OpenStreetMap", "https://www.openstreetmap.org/fix-the-map")
 
-/** Every text of a pin that holds several, as cards under the place's photo; tap one to hear it. */
+/** Every text of a place, as cards under the place's photo; tap one to hear it. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlaceSheet(place: Place, player: PlayerState, viewModel: TourViewModel, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         val photo = rememberPlacePhoto(viewModel, place.photoSpot())
         val name = place.scans.first().placeLabel()
-        val count = "${place.scans.size} texts"
+        val count = if (place.scans.size == 1) "1 text" else "${place.scans.size} texts"
         LazyColumn(
             Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
@@ -561,7 +562,7 @@ private fun PlaceSheet(place: Place, player: PlayerState, viewModel: TourViewMod
                         current -> "Paused"
                         else -> scan.timeLabel()
                     },
-                    title = null,
+                    title = scan.headline,
                     text = scan.text,
                     current = current,
                     image = {
