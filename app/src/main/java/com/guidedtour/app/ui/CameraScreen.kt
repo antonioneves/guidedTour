@@ -425,6 +425,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             // frame analysis, analysis off first; out of it, the camera first, then analysis back on. (A
             // failed combination leaves the camera closed.)
             val before = controller.cameraInfo
+        val baseline = if (nightOn) previewView?.brightness() else null
             val changes = controller.cameraSelector != selector
             // Quick taps on the night chip would open and close the camera faster than it can follow.
             delay(120)
@@ -500,6 +501,17 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                     night = false
                     snackbar.currentSnackbarData?.dismiss()
                     launch { snackbar.showSnackbar("Night mode isn't available right now") }
+                }
+            }
+            // Night mode must not come out darker than the normal view: if it does, it isn't working here.
+            if (nightOn) {
+                delay(800)
+                val now = previewView?.brightness()
+                Log.i(TAG, "camera: preview brightness ${baseline?.toInt()} before night mode, ${now?.toInt()} in it")
+                if (baseline != null && now != null && now < 25f && now < baseline * 0.35f) {
+                    night = false
+                    snackbar.currentSnackbarData?.dismiss()
+                    launch { snackbar.showSnackbar("Night mode comes out too dark on this lens") }
                 }
             }
         } finally {
@@ -1122,3 +1134,11 @@ private fun onMain(block: () -> Unit) {
     if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) block()
     else android.os.Handler(android.os.Looper.getMainLooper()).post(block)
 }
+
+/** The preview's average brightness (0–255), from a small copy of what it shows now; null if it shows nothing yet. */
+private fun PreviewView.brightness(): Float? = runCatching {
+    val small = android.graphics.Bitmap.createScaledBitmap(bitmap ?: return null, 24, 24, true)
+    val pixels = IntArray(24 * 24)
+    small.getPixels(pixels, 0, 24, 0, 0, 24, 24)
+    pixels.sumOf { (android.graphics.Color.red(it) * 3 + android.graphics.Color.green(it) * 6 + android.graphics.Color.blue(it)) / 10 }.toFloat() / pixels.size
+}.getOrNull()
