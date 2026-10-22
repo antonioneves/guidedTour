@@ -318,20 +318,14 @@ private fun VisitHeader(
         }
         return
     }
-    // No photo: a tonal banner shaped like the photo one, the arrow on a disc at its start.
+    // No photo: a tonal banner shaped like the photo one, the arrow at its end.
     val colors = MaterialTheme.colorScheme
     Row(
         modifier.fillMaxWidth().padding(top = 8.dp).clip(MaterialTheme.shapes.large).background(colors.surfaceContainerHighest)
             .then(toggle).then(state).padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (onToggle != null) {
-            Box(Modifier.size(36.dp).clip(CircleShape).background(colors.secondaryContainer), contentAlignment = Alignment.Center) {
-                Arrow(colors.onSecondaryContainer)
-            }
-            Spacer(Modifier.size(12.dp))
-        }
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).padding(start = 4.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             Text(count, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
@@ -340,6 +334,7 @@ private fun VisitHeader(
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text("Play visit")
         }
+        Arrow(colors.onSurfaceVariant, Modifier.padding(start = 8.dp, end = 4.dp))
     }
 }
 
