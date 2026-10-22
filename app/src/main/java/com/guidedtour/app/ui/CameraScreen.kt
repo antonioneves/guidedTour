@@ -371,7 +371,8 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
             analysisIntervalMs(
                 processing = state is ScanState.Processing,
                 showingResult = state is ScanState.Done,
-                textInView = frame.lines.isNotEmpty(),
+                // Frames still on screen count: they should go as soon as the text does.
+                textInView = frame.lines.isNotEmpty() || frames.isNotEmpty(),
             )
         )
     }

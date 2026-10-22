@@ -181,4 +181,21 @@ class TextFramesTest {
         val tracked = tracker.update(listOf(TextFrame(150f, 130f, 300f, 200f, listOf(block("x", 150, 130)), true)))
         assertTrue(tracked.any { it.left < 110 && it.right > 450 })
     }
+
+    @Test fun firstFramesInAnEmptyViewShowAtOnce() {
+        val tracker = FrameTracker()
+        assertTrue(tracker.update(listOf(frame(100f, 100f))).single().shown)
+        // A frame appearing next to settled ones still waits to be seen twice.
+        val tracked = tracker.update(listOf(frame(100f, 100f), frame(700f, 100f)))
+        assertFalse(tracked.single { it.left > 500 }.shown)
+    }
+
+    @Test fun framesGoWhenTwoUpdatesRunSeeNoText() {
+        val tracker = FrameTracker()
+        repeat(5) { tracker.update(listOf(frame(100f, 100f))) }
+        tracker.update(emptyList())
+        assertEquals(1, tracker.frames.size)
+        tracker.update(emptyList())
+        assertTrue(tracker.frames.isEmpty())
+    }
 }

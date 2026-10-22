@@ -164,23 +164,34 @@ class FrameTracker {
         /** Frames running the text has been somewhere else than a locked frame. */
         internal var drift = 0
         val included: Boolean get() = choice ?: suggested
-        /** Seen in a few frames running: worth showing. */
-        val shown: Boolean get() = seen >= SHOW_AFTER
+        /** Appeared in an empty view: shown at once, so pointing at text shows its frames without a wait. */
+        internal var quick = false
+        /** Seen in a few frames running (or at once in an empty view): worth showing. */
+        val shown: Boolean get() = quick || seen >= SHOW_AFTER
         fun contains(x: Float, y: Float, pad: Float) = x >= left - pad && x <= right + pad && y >= top - pad && y <= bottom + pad
     }
 
     private var nextId = 0
+    private var emptyRun = 0
     var frames: List<Tracked> = emptyList()
         private set
 
     /** Takes the frames of the latest preview frame; returns the tracked frames. */
     fun update(latest: List<TextFrame>): List<Tracked> {
+        // Nothing seen twice running: the camera has left the text, so the frames go now.
+        if (latest.isEmpty()) {
+            emptyRun++
+            frames = if (emptyRun >= EMPTY_KEEP) emptyList() else frames.onEach { it.missed++ }
+            return frames
+        }
+        emptyRun = 0
+        val wasEmpty = frames.isEmpty()
         val unmatched = frames.toMutableList()
         val next = mutableListOf<Tracked>()
         for (frame in latest.sortedByDescending { it.letters }) {
             val match = unmatched.maxByOrNull { overlap(it, frame) }?.takeIf { overlap(it, frame) > MATCH_OVERLAP }
             if (match == null) {
-                next += Tracked(nextId++, frame)
+                next += Tracked(nextId++, frame).also { it.quick = wasEmpty }
                 continue
             }
             unmatched -= match
@@ -283,6 +294,8 @@ class FrameTracker {
         const val KEEP_UNSEEN = 6
         const val SETTLE = 6
         const val SHOW_AFTER = 2
+        /** Updates with no text at all running before every frame is dropped. */
+        const val EMPTY_KEEP = 2
         /** An unseen frame goes at once when frames seen now cover this share of it. */
         const val GHOST_COVERED = 0.6f
         /** The smaller of two frames matched by one lying in the other is at least this share of the larger. */

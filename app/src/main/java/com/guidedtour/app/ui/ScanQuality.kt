@@ -58,5 +58,5 @@ fun analysisIntervalMs(processing: Boolean, showingResult: Boolean, textInView: 
     processing -> ANALYSIS_PAUSED
     showingResult -> 1000L
     textInView -> 150L
-    else -> 500L
+    else -> 300L
 }
