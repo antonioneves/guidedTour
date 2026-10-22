@@ -4,6 +4,7 @@ import com.guidedtour.app.data.FrameTracker
 import com.guidedtour.app.data.OcrBlock
 import com.guidedtour.app.data.OcrLine
 import com.guidedtour.app.data.TextFrame
+import com.guidedtour.app.data.mergeOverlapping
 import com.guidedtour.app.data.splitMergedColumns
 import com.guidedtour.app.data.textFrames
 import org.junit.Assert.assertEquals
@@ -98,5 +99,32 @@ class TextFramesTest {
         // The choice outlasts the suggestion changing.
         repeat(4) { tracker.update(listOf(frame(100f, 100f), frame(700f, 100f, suggested = false))) }
         assertFalse(tracker.frames.single { it.left < 500 }.included)
+    }
+
+    @Test fun overlappingFramesAreOneFrame() {
+        val inner = frame(150f, 120f)
+        val outer = TextFrame(100f, 100f, 520f, 330f, listOf(block("more text", 100, 100)), true)
+        val merged = mergeOverlapping(listOf(inner, outer))
+        assertEquals(1, merged.size)
+        assertEquals(2, merged.single().blocks.size)
+    }
+
+    @Test fun trackerKeepsOneFrameWhenItGrowsAroundTheOldOne() {
+        val tracker = FrameTracker()
+        val id = tracker.update(listOf(frame(100f, 100f))).single().id
+        // The same text read as a larger block, with the old one lying inside it.
+        val grown = TextFrame(60f, 60f, 560f, 400f, listOf(block("text", 60, 60)), true)
+        val tracked = tracker.update(listOf(grown))
+        assertEquals(1, tracked.size)
+        assertEquals(id, tracked.single().id)
+    }
+
+    @Test fun trackerDropsAFrameInsideAnother() {
+        val tracker = FrameTracker()
+        tracker.update(listOf(frame(100f, 100f)))
+        tracker.update(listOf(frame(100f, 100f)))
+        // A new, small frame appears inside the settled one: not tracked separately.
+        val tracked = tracker.update(listOf(frame(100f, 100f), TextFrame(150f, 130f, 300f, 200f, listOf(block("x", 150, 130)), true)))
+        assertEquals(1, tracked.size)
     }
 }

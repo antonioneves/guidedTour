@@ -22,6 +22,17 @@ data class TextFrame(
     fun contains(x: Float, y: Float, pad: Float = 0f) = x >= left - pad && x <= right + pad && y >= top - pad && y <= bottom + pad
 }
 
+/** The share of the smaller of two boxes that the other covers: 1 when one lies inside the other. */
+internal fun coverShare(l1: Float, t1: Float, r1: Float, b1: Float, l2: Float, t2: Float, r2: Float, b2: Float): Float {
+    val w = min(r1, r2) - max(l1, l2)
+    val h = min(b1, b2) - max(t1, t2)
+    if (w <= 0 || h <= 0) return 0f
+    return w * h / min((r1 - l1) * (b1 - t1), (r2 - l2) * (b2 - t2))
+}
+
+/** Frames covering this much of the smaller one are one frame. */
+internal const val SAME_FRAME = 0.6f
+
 /** At most this many frames are shown; the ones with the least text go first. */
 const val MAX_FRAMES = 6
 
@@ -34,7 +45,22 @@ fun textFrames(blocks: List<OcrBlock>, width: Int, height: Int): List<TextFrame>
         // Within a plaque, a frame per column (a heading across them gets its own), and the
         // suggested and skipped parts never share one.
         group.groupBy { it in aimed }.flatMap { (suggested, part) -> columnsOf(part).map { frameOf(it, suggested) } }
-    }.sortedByDescending { it.letters }.take(MAX_FRAMES)
+    }.let(::mergeOverlapping).sortedByDescending { it.letters }.take(MAX_FRAMES)
+}
+
+/** [frames] with those that overlap (one mostly inside another) joined into one, so text isn't framed twice. */
+internal fun mergeOverlapping(frames: List<TextFrame>): List<TextFrame> {
+    val out = frames.toMutableList()
+    while (true) {
+        val pair = out.indices.flatMap { i -> (i + 1 until out.size).map { i to it } }.firstOrNull { (i, j) ->
+            val a = out[i]
+            val b = out[j]
+            coverShare(a.left, a.top, a.right, a.bottom, b.left, b.top, b.right, b.bottom) > SAME_FRAME
+        } ?: return out
+        val (a, b) = out[pair.first] to out[pair.second]
+        out[pair.first] = frameOf((a.blocks + b.blocks).distinct(), a.suggested || b.suggested)
+        out.removeAt(pair.second)
+    }
 }
 
 private fun frameOf(blocks: List<OcrBlock>, suggested: Boolean) = TextFrame(
@@ -145,8 +171,8 @@ class FrameTracker {
         }
         // Briefly unseen frames stay, so one blurry preview frame doesn't make them blink.
         next += unmatched.filter { ++it.missed <= KEEP_UNSEEN }
-        frames = next
-        return next
+        frames = withoutDuplicates(next)
+        return frames
     }
 
     /** Includes or skips the frame at ([x], [y]); false if there's none there. */
@@ -160,13 +186,39 @@ class FrameTracker {
         frames = emptyList()
     }
 
-    /** How much [a] and [b] overlap, as a share of their union. */
+    /**
+     * How well [a] and [b] fit: their overlap as a share of their union, or, for one that grew or
+     * shrank around the other, how far it's inside it (only counted past [SAME_FRAME]).
+     */
     private fun overlap(a: Tracked, b: TextFrame): Float {
         val w = min(a.right, b.right) - max(a.left, b.left)
         val h = min(a.bottom, b.bottom) - max(a.top, b.top)
         if (w <= 0 || h <= 0) return 0f
         val both = w * h
-        return both / ((a.right - a.left) * (a.bottom - a.top) + (b.right - b.left) * (b.bottom - b.top) - both)
+        val union = both / ((a.right - a.left) * (a.bottom - a.top) + (b.right - b.left) * (b.bottom - b.top) - both)
+        val inside = coverShare(a.left, a.top, a.right, a.bottom, b.left, b.top, b.right, b.bottom)
+        return max(union, if (inside > SAME_FRAME) inside - SAME_FRAME + MATCH_OVERLAP + 0.01f else 0f)
+    }
+
+    /** [list] without frames mostly inside another: the longer seen (or the user's choice) stays. */
+    private fun withoutDuplicates(list: List<Tracked>): List<Tracked> {
+        val kept = list.sortedWith(compareByDescending<Tracked> { it.choice != null }.thenByDescending { it.seen }).toMutableList()
+        var i = 0
+        while (i < kept.size) {
+            val a = kept[i]
+            var j = i + 1
+            while (j < kept.size) {
+                val b = kept[j]
+                if (coverShare(a.left, a.top, a.right, a.bottom, b.left, b.top, b.right, b.bottom) > SAME_FRAME) {
+                    if (a.choice == null) a.choice = b.choice
+                    kept.removeAt(j)
+                } else {
+                    j++
+                }
+            }
+            i++
+        }
+        return list.filter { it in kept }
     }
 
     private companion object {
