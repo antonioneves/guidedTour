@@ -813,28 +813,31 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
 
         // Above the lens bar, when there is one.
         val lensBar = choices?.let { it.lenses.size > 1 || it.lenses.any { l -> l.night } } == true
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (lensBar) 200.dp else 140.dp)) { data ->
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = if (lensBar) 200.dp else 140.dp)) { data ->
             // A pill like the one at the top, with any action ("Turn off") inside it.
-            Surface(
-                shape = CircleShape,
-                color = Color.Black.copy(alpha = 0.6f),
-                contentColor = Color.White,
-                modifier = Modifier.padding(horizontal = 24.dp),
-            ) {
-                Row(
-                    Modifier.padding(start = 20.dp, end = if (data.visuals.actionLabel != null) 6.dp else 20.dp, top = 4.dp, bottom = 4.dp)
-                        .heightIn(min = 40.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+            // Centred in the full width, so a message replacing another doesn't start at the left.
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.6f),
+                    contentColor = Color.White,
+                    modifier = Modifier.padding(horizontal = 24.dp),
                 ) {
-                    Text(
-                        data.visuals.message,
-                        Modifier.weight(1f, fill = false).padding(vertical = 6.dp),
-                        style = MaterialTheme.typography.labelLarge,
-                        textAlign = TextAlign.Center,
-                    )
-                    data.visuals.actionLabel?.let { label ->
-                        TextButton(onClick = data::performAction, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.inversePrimary)) {
-                            Text(label)
+                    Row(
+                        Modifier.padding(start = 20.dp, end = if (data.visuals.actionLabel != null) 6.dp else 20.dp, top = 4.dp, bottom = 4.dp)
+                            .heightIn(min = 40.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            data.visuals.message,
+                            Modifier.weight(1f, fill = false).padding(vertical = 6.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            textAlign = TextAlign.Center,
+                        )
+                        data.visuals.actionLabel?.let { label ->
+                            TextButton(onClick = data::performAction, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.inversePrimary)) {
+                                Text(label)
+                            }
                         }
                     }
                 }
