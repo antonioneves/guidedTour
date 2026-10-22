@@ -406,15 +406,38 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
     LaunchedEffect(choices, lens, nightOn) {
         val c = choices ?: return@LaunchedEffect
         val chosen = lens ?: return@LaunchedEffect
-        val selector = (if (nightOn) c.nightSelector(chosen) else null) ?: chosen.selector
+        val nightSelector = if (nightOn) c.nightSelector(chosen) else null
+        val selector = nightSelector ?: chosen.selector
         val cases = if (liveOff) CameraController.IMAGE_CAPTURE else CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE
         if (liveOff) frame = EMPTY_FRAME
-        runCatching {
-            controller.setEnabledUseCases(cases)
-            if (controller.cameraSelector != selector) controller.cameraSelector = selector
-        }.onFailure { Log.w(TAG, "camera: can't switch to ${chosen.label}", it) }
-        // The zoom applies to the camera once it's open.
-        repeat(40) {
+        // Never ask for a combination the camera can't do, even for a moment: into night mode without
+        // frame analysis, analysis off first; out of it, the camera first, then analysis back on. (A
+        // failed combination leaves the camera closed.)
+        val switched = runCatching {
+            if (nightSelector != null) {
+                controller.setEnabledUseCases(cases)
+                controller.cameraSelector = selector
+            } else {
+                if (controller.cameraSelector != selector) controller.cameraSelector = selector
+                controller.setEnabledUseCases(cases)
+            }
+        }.onFailure { Log.w(TAG, "camera: can't switch to ${chosen.label}${if (nightOn) " in night mode" else ""}", it) }.isSuccess
+        if (!switched) {
+            // Back to a combination that works: this lens without night mode, the camera restarted.
+            runCatching {
+                if (controller.cameraSelector != chosen.selector) controller.cameraSelector = chosen.selector
+                controller.setEnabledUseCases(CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE)
+                controller.unbind()
+                controller.bindToLifecycle(lifecycleOwner)
+            }.onFailure { Log.w(TAG, "camera: can't restart", it) }
+            if (nightOn) {
+                night = false
+                snackbar.currentSnackbarData?.dismiss()
+                launch { snackbar.showSnackbar("Night mode isn't available with this lens") }
+            }
+        }
+        // The zoom applies to the camera once it's open (switching cameras can take a few seconds).
+        repeat(100) {
             val info = controller.cameraInfo
             val facing = if (chosen.front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
             if (info != null && info.lensFacing == facing && controller.zoomState.value != null) {
