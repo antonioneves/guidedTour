@@ -13,6 +13,7 @@ import com.guidedtour.app.data.Accuracy
 import com.guidedtour.app.data.AiProofreader
 import com.guidedtour.app.data.Backup
 import com.guidedtour.app.data.CloudOcr
+import com.guidedtour.app.data.PlaceAbout
 import com.guidedtour.app.data.Headliner
 import com.guidedtour.app.data.printedTitle
 import com.guidedtour.app.data.WordLists
@@ -392,6 +393,12 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     fun playNow(scan: Scan, translated: Boolean = false) { reader.play(scan.item(translated)); start() }
     fun playNext(scan: Scan, translated: Boolean = false) { reader.enqueue(scan.item(translated), next = true); start() }
     fun addToQueue(scan: Scan, translated: Boolean = false) { reader.enqueue(scan.item(translated), next = false); start() }
+    /** Reads a place's Wikipedia introduction ([about], of the place at [spot]) now. */
+    fun playAbout(about: PlaceAbout, spot: PhotoSpot) {
+        reader.play(QueueItem(aboutId(about), false, about.title, about.text, about.language, spot = spot))
+        start()
+    }
+
     fun playAll(scans: List<Scan>) { val spots = spots(); reader.playAll(scans.map { it.item(false, spots) }); start() }
 
     val speechReady: StateFlow<Boolean> = reader.speechReady
@@ -616,3 +623,6 @@ private const val BACKUP_DELAY_MS = 30_000L
 
 /** How far the player's back and forward buttons jump. */
 const val SEEK_SECONDS = 10
+
+/** The player's id for a place's Wikipedia introduction: negative, so it's never a guide's. */
+fun aboutId(about: PlaceAbout): Long = -1L - (about.page.hashCode().toLong() and 0xffff_ffffL)

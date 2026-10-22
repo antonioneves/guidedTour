@@ -636,7 +636,7 @@ fun SettingsSheet(viewModel: TourViewModel, onDismiss: () -> Unit) {
 
             SwitchRow(
                 "Photos of places",
-                "Shows a Wikipedia photo of each place in Guides and on the map. Asks Wikipedia about each place by its name and area, never your exact position.",
+                "Shows a Wikipedia photo of each place in Guides and on the map, and its Wikipedia introduction among the place's texts. Asks Wikipedia about each place by its name and area, never your exact position.",
                 placePhotos, settings::setPlacePhotos,
             )
 

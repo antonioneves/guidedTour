@@ -24,6 +24,12 @@ data class PlacePhoto(val bitmap: Bitmap, val author: String, val license: Strin
     val credit: String get() = listOf(author, license).filter { it.isNotBlank() }.joinToString(" · ")
 }
 
+/**
+ * The start of the Wikipedia article about a place, in [language] (where Wikipedia has it, else
+ * English), for "About this place": the article's [title], its introduction as plain text, and its [page].
+ */
+data class PlaceAbout(val title: String, val text: String, val language: String, val page: String)
+
 /** What a place's photo is looked up by: where it is and what it's called. */
 data class PhotoSpot(val latitude: Double, val longitude: Double, val name: String?)
 
@@ -100,6 +106,75 @@ class PlacePhotos private constructor(context: Context) {
             if (file.exists()) return@withLock file.readLines().filter { it.isNotBlank() }.toSet()
             runCatching { fetchWords(spot) }.getOrNull()?.also { words -> runCatching { file.writeText(words.joinToString("\n")) } }.orEmpty()
         }
+    }
+
+    /**
+     * The introduction of the Wikipedia article about the place at [spot], in [language] where there's
+     * one: the place's own article if it's nearby, else the most notable one around (as for its
+     * photo). Asked once per place and language and kept, so it also shows offline; null if there's
+     * none (asked again after a while) or it can't be fetched now.
+     */
+    suspend fun about(spot: PhotoSpot, language: String): PlaceAbout? = withContext(Dispatchers.IO) {
+        val file = File(dir, key(spot.latitude, spot.longitude, spot.name) + ".about.$language.json")
+        lock.withLock {
+            val saved = file.takeIf { it.exists() }?.let { runCatching { JSONObject(it.readText()) }.getOrNull() }
+            if (saved != null) {
+                if (!saved.optBoolean("none")) {
+                    return@withLock PlaceAbout(saved.getString("title"), saved.getString("text"), saved.getString("language"), saved.getString("page"))
+                }
+                if (System.currentTimeMillis() - saved.optLong("checked") < RETRY_NONE_MS) return@withLock null
+            }
+            runCatching {
+                val about = fetchAbout(spot, language)
+                file.writeText(
+                    about?.let { JSONObject().put("title", it.title).put("text", it.text).put("language", it.language).put("page", it.page) }
+                        ?.toString()
+                        ?: JSONObject().put("none", true).put("checked", System.currentTimeMillis()).toString(),
+                )
+                about
+            }.getOrNull()
+        }
+    }
+
+    private fun fetchAbout(spot: PhotoSpot, language: String): PlaceAbout? {
+        val coord = "%.3f|%.3f".format(Locale.US, spot.latitude, spot.longitude)
+        val english = spot.name?.let { namedTitle(it, coord) } ?: nearbyTitle(coord) ?: return null
+        // The same article in the reader's language, when Wikipedia has it.
+        val (wiki, title) = if (language == "en") "en" to english else {
+            val links = get(
+                "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&prop=langlinks" +
+                    "&lllang=${encode(language)}&titles=${encode(english)}",
+            ).optJSONObject("query")?.optJSONArray("pages")?.optJSONObject(0)?.optJSONArray("langlinks")?.optJSONObject(0)?.optString("title")
+            if (links.isNullOrBlank()) "en" to english else language to links
+        }
+        val page = get(
+            "https://$wiki.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&prop=extracts|info&inprop=url" +
+                "&explaintext=1&exintro=1&redirects=1&titles=${encode(title)}",
+        ).optJSONObject("query")?.optJSONArray("pages")?.optJSONObject(0) ?: return null
+        val text = introOf(page.optString("extract")) ?: return null
+        return PlaceAbout(page.optString("title", title), text, wiki, page.optString("fullurl"))
+    }
+
+    /** The article titled [name], if it's within [NAMED_RADIUS_M] of [coord]. */
+    private fun namedTitle(name: String, coord: String): String? {
+        val page = get(
+            "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&redirects=1" +
+                "&titles=${encode(name)}&prop=coordinates&codistancefrompoint=${encode(coord)}",
+        ).optJSONObject("query")?.optJSONArray("pages")?.optJSONObject(0) ?: return null
+        val distance = page.optJSONArray("coordinates")?.optJSONObject(0)?.optDouble("dist") ?: return null
+        return page.getString("title").takeIf { !page.has("missing") && distance <= NAMED_RADIUS_M }
+    }
+
+    /** The most notable article near [coord] (the longest, weighed down by distance). */
+    private fun nearbyTitle(coord: String): String? {
+        val pages = get(
+            "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&generator=geosearch" +
+                "&ggscoord=${encode(coord)}&ggsradius=$PHOTO_RADIUS_M&ggslimit=20&prop=coordinates|info&codistancefrompoint=${encode(coord)}",
+        ).optJSONObject("query")?.optJSONArray("pages") ?: return null
+        return (0 until pages.length()).map { pages.getJSONObject(it) }.maxByOrNull { page ->
+            val distance = page.optJSONArray("coordinates")?.optJSONObject(0)?.optDouble("dist", PHOTO_RADIUS_M.toDouble()) ?: PHOTO_RADIUS_M.toDouble()
+            page.optInt("length") / (1 + (distance / 100).let { it * it })
+        }?.getString("title")
     }
 
     private fun fetchWords(spot: PhotoSpot): Set<String> {
@@ -258,3 +333,23 @@ class PlacePhotos private constructor(context: Context) {
     private fun plain(html: String?): String =
         Html.fromHtml(html.orEmpty(), Html.FROM_HTML_MODE_LEGACY).toString().replace(Regex("\\s+"), " ").trim()
 }
+
+/**
+ * The first paragraphs of an article's introduction, up to about [MAX_ABOUT] characters, without the
+ * pronunciation and other bracketed asides speech would trip over; null if there's no real text.
+ */
+internal fun introOf(extract: String): String? {
+    val paragraphs = extract.split(Regex("""\n+""")).map { paragraph ->
+        paragraph.replace(Regex("""\s*\([^()]*\)"""), "").replace(Regex("""\s+"""), " ").replace(" ,", ",").trim()
+    }.filter { it.length > 40 }
+    if (paragraphs.isEmpty()) return null
+    val kept = mutableListOf<String>()
+    for (paragraph in paragraphs) {
+        if (kept.isNotEmpty() && kept.sumOf { it.length } + paragraph.length > MAX_ABOUT) break
+        kept += paragraph
+    }
+    return kept.joinToString("\n\n")
+}
+
+/** About a minute of listening. */
+private const val MAX_ABOUT = 1_200

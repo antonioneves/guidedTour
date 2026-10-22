@@ -86,6 +86,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.animation.animateContentSize
 import com.guidedtour.app.TourViewModel
 import com.guidedtour.app.data.Place
+import com.guidedtour.app.data.PhotoSpot
+import com.guidedtour.app.data.PlaceAbout
+import com.guidedtour.app.data.Translator
+import com.guidedtour.app.aboutId
+import androidx.compose.runtime.produceState
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import com.guidedtour.app.data.PlayerState
 import com.guidedtour.app.data.Scan
 import com.guidedtour.app.data.dailyRoutes
@@ -551,6 +559,7 @@ private fun PlaceSheet(place: Place, player: PlayerState, viewModel: TourViewMod
                     }
                 }
             }
+            item(key = "about") { AboutPlace(viewModel, place.photoSpot(), player) }
             // Oldest first, the order they were walked and "Play all" reads them.
             items(place.scans, key = { it.id }) { scan ->
                 val current = player.current?.id == scan.id
@@ -575,6 +584,63 @@ private fun PlaceSheet(place: Place, player: PlayerState, viewModel: TourViewMod
                     FilledTonalIconButton(onClick = play) {
                         Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Read aloud")
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The start of the place's Wikipedia article, in the language guides are translated into where
+ * Wikipedia has it: a few lines (tap for all), a button to hear it, and a link to the article.
+ * Nothing shows without one, or when "Photos of places" (which asks Wikipedia) is off.
+ */
+@Composable
+private fun AboutPlace(viewModel: TourViewModel, spot: PhotoSpot, player: PlayerState) {
+    val enabled by viewModel.settings.placePhotos.collectAsStateWithLifecycle()
+    val translateTo by viewModel.settings.translateTo.collectAsStateWithLifecycle()
+    val language = Translator.target(translateTo)
+    val about by produceState<PlaceAbout?>(null, enabled, spot, language) {
+        value = if (enabled) viewModel.placePhotos.about(spot, language) else null
+    }
+    val shown = about ?: return
+    val uris = LocalUriHandler.current
+    var expanded by remember { mutableStateOf(false) }
+    val current = player.current?.id == aboutId(shown)
+    val playing = current && player.playing
+    ElevatedCard(
+        onClick = { expanded = !expanded },
+        colors = CardDefaults.elevatedCardColors(containerColor = if (current) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow),
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
+    ) {
+        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp)) {
+            Text(
+                "About this place · Wikipedia",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(shown.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 2.dp, end = 8.dp))
+            Text(
+                shown.text,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = if (expanded) Int.MAX_VALUE else 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 4.dp, end = 8.dp),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "CC BY-SA 4.0",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { uris.openUri(shown.page) }) {
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, null, Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text("Article")
+                }
+                FilledTonalIconButton(onClick = { if (current) viewModel.togglePlayback() else viewModel.playAbout(shown, spot) }) {
+                    Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Read aloud")
                 }
             }
         }
