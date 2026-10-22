@@ -143,7 +143,7 @@ fun MapScreen(viewModel: TourViewModel) {
     // The place whose pin was tapped (by its first scan's id): its row is scrolled to and highlighted.
     var selected by remember { mutableStateOf<Long?>(null) }
     var showCredits by remember { mutableStateOf(false) }
-    // A tapped row, or pin holding several texts (by its first scan's id): its texts are listed in a sheet.
+    // A tapped row or pin (by its first scan's id): its texts are listed in a sheet.
     var stack by remember { mutableStateOf<Long?>(null) }
     val listState = rememberLazyListState()
     val dark = isSystemInDarkTheme()
@@ -291,7 +291,7 @@ fun MapScreen(viewModel: TourViewModel) {
                         val place = index?.let { currentPlaces.getOrNull(it) }
                         val key = place?.scans?.first()?.id
                         selected = key
-                        if (place != null && place.scans.size > 1) stack = key
+                        if (place != null) stack = key
                         // Bring the tapped place's row into view in the list below.
                         val row = currentListed.indexOfFirst { it.scans.first().id == key }
                         if (row >= 0) scope.launch { listState.animateScrollToItem(row) }
