@@ -151,6 +151,8 @@ import com.google.mlkit.vision.text.Text
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 
 private const val AUTO_CAPTURE_MS = 2500L
 private const val IDLE_RELEASE_MS = 20_000L
@@ -428,18 +430,13 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
         }.onFailure { Log.w(TAG, "camera: can't switch to ${chosen.label}${if (nightOn) " in night mode" else ""}", it) }.isSuccess
         // The phone can also refuse after the call has returned (the camera then closes with an error):
         // a new camera that isn't open a few seconds later is given up.
-        if (switched && changes) {
-            var opened = false
-            for (i in 0 until 120) {
-                val info = controller.cameraInfo
-                val camera = if (info != null && info !== before) info.cameraState.value else null
-                if (camera?.type == androidx.camera.core.CameraState.Type.OPEN) { opened = true; break }
-                if (camera?.error != null) {
-                    Log.w(TAG, "camera: ${chosen.label}${if (nightOn) " in night mode" else ""} closed with ${camera.error}")
-                    break
-                }
-                delay(50)
-            }
+        if (switched && changes && before != null) {
+            // The new camera's info replaces the old one's once it's bound.
+            repeat(40) { if (controller.cameraInfo == null || controller.cameraInfo === before) delay(50) }
+            val info = controller.cameraInfo
+            // Still the old camera's info: not known to have failed.
+            val opened = info == null || info === before || withTimeoutOrNull(6_000) { info.opens() } == true
+            if (!opened) Log.w(TAG, "camera: ${chosen.label}${if (nightOn) " in night mode" else ""} didn't open")
             if (!opened) switched = false
         }
         if (!switched) {
@@ -1030,4 +1027,21 @@ private fun Shutter(progress: Float, showRing: Boolean, onClick: () -> Unit) {
             modifier = Modifier.size(70.dp).semantics { contentDescription = "Take photo and read text" },
         ) {}
     }
+}
+
+/** Waits until this camera is open (true) or has closed with an error (false): its state only updates while observed. */
+private suspend fun androidx.camera.core.CameraInfo.opens(): Boolean = suspendCancellableCoroutine { cont ->
+    val observer = object : androidx.lifecycle.Observer<androidx.camera.core.CameraState> {
+        override fun onChanged(value: androidx.camera.core.CameraState) {
+            val done = when {
+                value.type == androidx.camera.core.CameraState.Type.OPEN -> true
+                value.error != null -> false
+                else -> return
+            }
+            cameraState.removeObserver(this)
+            if (cont.isActive) cont.resume(done)
+        }
+    }
+    cameraState.observeForever(observer)
+    cont.invokeOnCancellation { cameraState.removeObserver(observer) }
 }
