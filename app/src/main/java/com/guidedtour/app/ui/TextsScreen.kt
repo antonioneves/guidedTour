@@ -449,51 +449,48 @@ private fun ScanCard(
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(end = 8.dp)) {
+            // Closed: the photo, the headline (or the text's start) with its language, and Listen.
+            val status = listOfNotNull(scan.languageLabel(), if (queued) "In queue" else null, if (translating) "Translating…" else null).joinToString(" · ")
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Thumbnail(
                     scan.thumbnail,
                     Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "View photo") { viewing = true },
                     maxSide = 256,
                 )
-                // A headline, where there is one, stands for the text until the card is opened.
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    // Opened, a printed title is already the text's first line.
-                    if (scan.headline != null && !(expanded && scan.text.startsWith(scan.headline, ignoreCase = true))) {
-                        Text(scan.headline, style = MaterialTheme.typography.titleMedium)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (scan.headline != null) {
+                        Text(scan.headline, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    } else if (!expanded) {
+                        Text(scan.text, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
-                    if (scan.headline == null || expanded) {
+                    if (status.isNotEmpty()) {
+                        Text(status, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                ListenButton(scan, player, translating, target, viewModel)
+            }
+            // Opened: the whole text, and its translation (a printed title isn't repeated above it: it's the text's first line).
+            if (expanded) {
+                HighlightedText(
+                    scan.text,
+                    if (current?.translated == false) player.highlight else null,
+                    MaterialTheme.typography.bodyLarge,
+                    Modifier.padding(top = 4.dp, end = 8.dp),
+                )
+                if (scan.translation != null) {
+                    Column(Modifier.padding(top = 4.dp, end = 8.dp)) {
+                        Text(
+                            "Translation" + (scan.translationTag?.let { " · ${Translator.nameOf(it)}" } ?: ""),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
                         HighlightedText(
-                            scan.text,
-                            if (current?.translated == false) player.highlight else null,
-                            MaterialTheme.typography.bodyLarge,
-                            maxLines = if (expanded) Int.MAX_VALUE else 4,
+                            scan.translation,
+                            if (current?.translated == true) player.highlight else null,
+                            MaterialTheme.typography.bodyMedium,
                         )
                     }
                 }
-            }
-            if (scan.translation != null && (scan.headline == null || expanded)) {
-                Column(Modifier.padding(end = 8.dp)) {
-                    Text(
-                        "Translation" + (scan.translationTag?.let { " · ${Translator.nameOf(it)}" } ?: ""),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    HighlightedText(
-                        scan.translation,
-                        if (current?.translated == true) player.highlight else null,
-                        MaterialTheme.typography.bodyMedium,
-                        maxLines = if (expanded) Int.MAX_VALUE else 3,
-                    )
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 8.dp)) {
-                Text(
-                    listOfNotNull(scan.languageLabel(), if (queued) "In queue" else null, if (translating) "Translating…" else null).joinToString(" · "),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.weight(1f))
-                ListenButton(scan, player, translating, target, viewModel)
             }
         }
     }
