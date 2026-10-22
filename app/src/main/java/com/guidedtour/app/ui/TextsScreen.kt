@@ -364,6 +364,9 @@ private fun ScanCard(
     var choosingLanguage by remember { mutableStateOf(false) }
     var confirmCloud by remember { mutableStateOf(false) }
     var viewing by remember { mutableStateOf(false) }
+    // Whether Listen reads the translation: by default once there is one.
+    var useTranslation by rememberSaveable(scan.id) { mutableStateOf(scan.translation != null) }
+    LaunchedEffect(scan.translation) { if (scan.translation != null) useTranslation = true }
     if (viewing && scan.thumbnail != null) PhotoViewer(scan.thumbnail, onDismiss = { viewing = false })
     val current = player.current?.takeIf { it.id == scan.id }
     val active = current != null
@@ -449,8 +452,9 @@ private fun ScanCard(
                     }
                 }
             }
-            // Closed: the photo, the headline (or the text's start) with its language, and Listen.
-            val status = listOfNotNull(scan.languageLabel(), if (queued) "In queue" else null, if (translating) "Translating…" else null).joinToString(" · ")
+            // Closed: the photo, the headline (or the text's start) with the language Listen reads it in, and Listen.
+            val language = if (useTranslation && scan.translation != null) scan.translationTag?.let(Translator::nameOf) else scan.languageLabel()
+            val status = listOfNotNull(language, if (queued) "In queue" else null, if (translating) "Translating…" else null).joinToString(" · ")
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Thumbnail(
                     scan.thumbnail,
@@ -467,7 +471,7 @@ private fun ScanCard(
                         Text(status, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                ListenButton(scan, player, translating, target, viewModel)
+                ListenButton(scan, player, translating, target, viewModel, useTranslation) { useTranslation = it }
             }
             // Opened: the whole text, and its translation (a printed title isn't repeated above it: it's the text's first line).
             if (expanded) {
@@ -559,31 +563,34 @@ private fun ReadingCard(modifier: Modifier = Modifier) {
 /**
  * Plays or pauses the scan. When it has (or can have) a translation, it is a split button: the
  * arrow picks the original, the translation, or translating into [target]; picking one plays it.
- * With a translation it plays the translation by default.
+ * [useTranslation] (the card's, which names the language beside it) says which one it plays.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun ListenButton(scan: Scan, player: PlayerState, translating: Boolean, target: String, viewModel: TourViewModel) {
+private fun ListenButton(
+    scan: Scan,
+    player: PlayerState,
+    translating: Boolean,
+    target: String,
+    viewModel: TourViewModel,
+    useTranslation: Boolean,
+    onUseTranslation: (Boolean) -> Unit,
+) {
     val current = player.current?.takeIf { it.id == scan.id }
     val playing = current != null && player.playing
     val translatable = Translator.needsTranslation(scan.allLanguages(), target)
     val hasTranslation = scan.translation != null
-    var useTranslation by rememberSaveable(scan.id) { mutableStateOf(hasTranslation) }
-    LaunchedEffect(scan.translation) { if (scan.translation != null) useTranslation = true }
     var menu by remember { mutableStateOf(false) }
 
     fun play(translated: Boolean) {
-        useTranslation = translated
+        onUseTranslation(translated)
         if (current != null && current.translated == translated) viewModel.togglePlayback() else viewModel.playNow(scan, translated)
     }
+    // The language it reads in is named beside it, on the card.
     val label = when {
         playing -> "Pause"
         current != null -> "Resume"
-        !hasTranslation && !translatable -> "Listen"
-        useTranslation && hasTranslation -> "Listen · ${scan.translationTag?.let(Translator::nameOf) ?: "translation"}"
-        // A bilingual text's languages are already named beside the button.
-        scan.allLanguages().size > 1 -> "Listen · original"
-        else -> "Listen · ${scan.languageLabel() ?: "original"}"
+        else -> "Listen"
     }
     val content: @Composable RowScope.() -> Unit = {
         Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(ButtonDefaults.IconSize))
@@ -633,7 +640,7 @@ private fun ListenButton(scan: Scan, player: PlayerState, translating: Boolean, 
                     text = { Text(if (translating) "Translating…" else "Translate into ${Translator.nameOf(target)}") },
                     leadingIcon = { Icon(Icons.Filled.Translate, null) },
                     enabled = !translating,
-                    onClick = { menu = false; useTranslation = true; viewModel.translate(scan) },
+                    onClick = { menu = false; onUseTranslation(true); viewModel.translate(scan) },
                 )
             }
         }
