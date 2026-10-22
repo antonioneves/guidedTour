@@ -480,6 +480,28 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                     }
                 }
             }
+            // An open camera can still deliver no frames (a night session stuck after quick toggles shows a
+            // black preview): if none arrive, the camera is started again, and without night mode if that fails.
+            suspend fun streaming(): Boolean {
+                val view = previewView ?: return true
+                delay(300)
+                return withTimeoutOrNull(4_000) { view.streams() } == true
+            }
+            if (!streaming()) {
+                Log.w(TAG, "camera: no preview frames after switching to ${chosen.label}${if (nightOn) " in night mode" else ""}")
+                runCatching {
+                    controller.unbind()
+                    controller.bindToLifecycle(lifecycleOwner)
+                }.onFailure { Log.w(TAG, "camera: can't restart", it) }
+                if (streaming()) {
+                    withTimeoutOrNull(3_000) { while (controller.zoomState.value == null) delay(50) }
+                    controller.setZoomRatio(chosen.zoom)
+                } else if (nightOn) {
+                    night = false
+                    snackbar.currentSnackbarData?.dismiss()
+                    launch { snackbar.showSnackbar("Night mode isn't available right now") }
+                }
+            }
         } finally {
             if (switchToken[0] == mine) switching = false
         }
@@ -1080,4 +1102,17 @@ private suspend fun androidx.camera.core.CameraInfo.opens(): Boolean = suspendCa
     }
     cameraState.observeForever(observer)
     cont.invokeOnCancellation { cameraState.removeObserver(observer) }
+}
+
+/** Waits until the preview shows camera frames (true). */
+private suspend fun PreviewView.streams(): Boolean = suspendCancellableCoroutine { cont ->
+    val observer = object : androidx.lifecycle.Observer<PreviewView.StreamState> {
+        override fun onChanged(value: PreviewView.StreamState) {
+            if (value != PreviewView.StreamState.STREAMING) return
+            previewStreamState.removeObserver(this)
+            if (cont.isActive) cont.resume(true)
+        }
+    }
+    previewStreamState.observeForever(observer)
+    cont.invokeOnCancellation { previewStreamState.removeObserver(observer) }
 }
