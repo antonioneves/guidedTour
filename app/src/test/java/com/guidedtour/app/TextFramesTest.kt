@@ -163,4 +163,14 @@ class TextFramesTest {
         assertEquals(id, moved.id)
         assertTrue(moved.left > 240f)
     }
+
+    @Test fun framesAtTheEdgeAreIgnoredUnlessTheyAreAllThereIs() {
+        val main = block("The Parthenon was built between 447 and 432 BC as a temple", 300, 300, width = 900, lines = 5)
+        val cut = block("half a line of another plaque", 0, 600, width = 500, lines = 2)
+        val both = textFrames(listOf(main, cut), 1600, 1200)
+        assertEquals(1, both.size)
+        assertTrue(both.single().blocks.contains(main))
+        // Alone, the text at the edge is all there is to read.
+        assertEquals(1, textFrames(listOf(cut), 1600, 1200).size)
+    }
 }

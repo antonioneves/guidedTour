@@ -49,7 +49,20 @@ fun textFrames(blocks: List<OcrBlock>, width: Int, height: Int): List<TextFrame>
         // Within a plaque, a frame per column (a heading across them gets its own), and the
         // suggested and skipped parts never share one.
         group.groupBy { it in aimed }.flatMap { (suggested, part) -> columnsOf(part).map { frameOf(it, suggested) } }
-    }.let(::mergeOverlapping).sortedByDescending { it.letters }.take(MAX_FRAMES)
+    }.let(::mergeOverlapping).let { withoutEdges(it, width, height) }.sortedByDescending { it.letters }.take(MAX_FRAMES)
+}
+
+/** A frame this close to the view's edge (as a share of its smaller side) is cut off by it. */
+private const val EDGE = 0.02f
+
+/**
+ * [frames] without those touching the edge of the view: their text is cut off, so they'd only read
+ * half a line. If every frame touches it (a plaque filling the view), they all stay.
+ */
+internal fun withoutEdges(frames: List<TextFrame>, width: Int, height: Int): List<TextFrame> {
+    val margin = EDGE * min(width, height)
+    val inside = frames.filter { it.left > margin && it.top > margin && it.right < width - margin && it.bottom < height - margin }
+    return inside.ifEmpty { frames }
 }
 
 /** [frames] with those that overlap (one mostly inside another) joined into one, so text isn't framed twice. */
