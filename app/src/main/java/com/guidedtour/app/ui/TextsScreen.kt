@@ -270,7 +270,6 @@ fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings
  * of texts. Tapping it opens or closes the visit's cards ([onToggle]; null while searching, when
  * every visit with a match stays [open]).
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun VisitHeader(
     visit: Visit,
@@ -319,7 +318,7 @@ private fun VisitHeader(
         }
         return
     }
-    // No photo: the name on the list's background, the arrow part of Play visit, as a split button.
+    // No photo: the name on the list's background, Play visit as text, the arrow on a pill.
     val colors = MaterialTheme.colorScheme
     Row(
         modifier.fillMaxWidth().padding(top = 8.dp).clip(MaterialTheme.shapes.medium).then(toggle).then(state).padding(vertical = 4.dp),
@@ -329,26 +328,19 @@ private fun VisitHeader(
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             Text(count, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
-        val play: @Composable RowScope.() -> Unit = {
+        TextButton(onClick = onPlay) {
             Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text("Play visit")
         }
-        if (onToggle == null) {
-            FilledTonalButton(onClick = onPlay, content = play)
-        } else {
-            SplitButtonLayout(
-                leadingButton = { SplitButtonDefaults.TonalLeadingButton(onClick = onPlay, content = play) },
-                trailingButton = {
-                    SplitButtonDefaults.TonalTrailingButton(
-                        checked = open,
-                        onCheckedChange = { onToggle() },
-                        modifier = Modifier.semantics { contentDescription = if (open) "Hide its texts" else "Show its texts" },
-                    ) {
-                        Icon(Icons.Filled.KeyboardArrowDown, null, Modifier.size(SplitButtonDefaults.TrailingIconSize).rotate(turn))
-                    }
-                },
-            )
+        if (onToggle != null) {
+            FilledTonalButton(
+                onClick = onToggle,
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                modifier = Modifier.semantics { contentDescription = if (open) "Hide its texts" else "Show its texts" },
+            ) {
+                Icon(Icons.Filled.KeyboardArrowDown, null, Modifier.rotate(turn))
+            }
         }
     }
 }
