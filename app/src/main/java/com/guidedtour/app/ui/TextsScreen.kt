@@ -36,7 +36,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
@@ -634,10 +633,6 @@ private fun ListenButton(
         Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(ButtonDefaults.IconSize))
         Spacer(Modifier.size(ButtonDefaults.IconSpacing))
         Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (playing) {
-            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-            Icon(Icons.Filled.GraphicEq, null, Modifier.size(ButtonDefaults.IconSize))
-        }
     }
     if (!hasTranslation && !translatable) {
         FilledTonalButton(onClick = { play(false) }, content = content)
