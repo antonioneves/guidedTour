@@ -86,6 +86,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.animation.animateContentSize
 import com.guidedtour.app.TourViewModel
 import com.guidedtour.app.data.Place
+import com.guidedtour.app.data.OfflineMaps
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.filled.Delete
+import com.guidedtour.app.data.tiles
+import androidx.compose.material.icons.filled.DownloadForOffline
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import com.guidedtour.app.data.PhotoSpot
 import com.guidedtour.app.data.PlaceAbout
 import com.guidedtour.app.data.Translator
@@ -151,6 +158,7 @@ fun MapScreen(viewModel: TourViewModel) {
     // The place whose pin was tapped (by its first scan's id): its row is scrolled to and highlighted.
     var selected by remember { mutableStateOf<Long?>(null) }
     var showCredits by remember { mutableStateOf(false) }
+    var showOffline by remember { mutableStateOf(false) }
     // A tapped row or pin (by its first scan's id): its texts are listed in a sheet.
     var stack by remember { mutableStateOf<Long?>(null) }
     val listState = rememberLazyListState()
@@ -323,6 +331,26 @@ fun MapScreen(viewModel: TourViewModel) {
                 }
             }
             if (showCredits) MapCredits(onDismiss = { showCredits = false })
+            if (showOffline) {
+                OfflineMapsSheet(
+                    online = online,
+                    area = {
+                        map?.projection?.visibleRegion?.latLngBounds?.let { bounds ->
+                            // Named after the visited place nearest the middle of the screen, if there's one.
+                            val middle = bounds.center
+                            val near = places.minByOrNull { (it.latitude - middle.latitude).let { d -> d * d } + (it.longitude - middle.longitude).let { d -> d * d } }
+                                ?.takeIf { bounds.contains(LatLng(it.latitude, it.longitude)) }
+                            bounds to (near?.scans?.first()?.placeLabel() ?: "Map area, ${java.time.LocalDate.now()}")
+                        }
+                    },
+                    styles = listOf(LIGHT_STYLE, DARK_STYLE),
+                    onDismiss = { showOffline = false },
+                )
+            }
+            FilledTonalIconButton(
+                onClick = { showOffline = true },
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 16.dp, end = 12.dp),
+            ) { Icon(Icons.Filled.DownloadForOffline, "Offline maps") }
             places.firstOrNull { it.scans.first().id == stack }?.let { place ->
                 PlaceSheet(place, player, viewModel, onDismiss = { stack = null })
             }
@@ -333,7 +361,7 @@ fun MapScreen(viewModel: TourViewModel) {
                         color = MaterialTheme.colorScheme.errorContainer,
                         contentColor = MaterialTheme.colorScheme.onErrorContainer,
                     ) {
-                        Text("You're offline – only places you've already viewed will show.", Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+                        Text("You're offline – only saved areas and places you've already viewed will show.", Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
                     }
                 }
             }
@@ -641,6 +669,69 @@ private fun AboutPlace(viewModel: TourViewModel, spot: PhotoSpot, player: Player
                 }
                 FilledTonalIconButton(onClick = { if (current) viewModel.togglePlayback() else viewModel.playAbout(shown, spot) }) {
                     Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Read aloud")
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Map areas saved for use without a connection: save the area on screen ([area] gives its bounds
+ * and a name), follow or stop the download, and delete saved areas.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OfflineMapsSheet(online: Boolean, area: () -> Pair<LatLngBounds, String>?, styles: List<String>, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val offline = remember { OfflineMaps.get(context) }
+    val areas by offline.areas.collectAsStateWithLifecycle()
+    val saving by offline.saving.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { offline.refresh() }
+    fun toast(text: String) = android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Offline maps", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+            Text(
+                "Save the map of a city before you go, and the Places map works there without a connection.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val progress = saving
+            if (progress != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Saving the map… ${(progress * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
+                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    }
+                    TextButton(onClick = { offline.cancel() }) { Text("Stop") }
+                }
+            } else {
+                OutlinedButton(
+                    enabled = online,
+                    onClick = {
+                        val (bounds, name) = area() ?: return@OutlinedButton
+                        val count = tiles(bounds.latitudeSouth, bounds.longitudeWest, bounds.latitudeNorth, bounds.longitudeEast)
+                        if (count > OfflineMaps.MAX_TILES) { toast("Zoom in to a city or smaller to save it"); return@OutlinedButton }
+                        offline.save(bounds, name, styles) { ok -> toast(if (ok) "$name saved for offline use" else "The map wasn't saved") }
+                    },
+                ) {
+                    Icon(Icons.Filled.DownloadForOffline, null, Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text(if (online) "Save the area on screen" else "Connect to save maps")
+                }
+            }
+            if (areas.isNotEmpty()) Text("Saved", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 4.dp))
+            areas.forEach { saved ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(saved.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            android.text.format.Formatter.formatShortFileSize(context, saved.bytes) + if (saved.complete) "" else " · not complete",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { offline.delete(saved) }) { Icon(Icons.Filled.Delete, "Delete ${saved.name}") }
                 }
             }
         }
