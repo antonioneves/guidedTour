@@ -38,6 +38,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -400,6 +403,9 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
     // Night mode where the phone can't analyse frames alongside it: the preview is read instead.
     val liveOff = nightOn && lens?.nightLive != true
     var zoom by remember { mutableFloatStateOf(1f) }
+    // The camera is being switched (or its zoom set): a veil shows if it takes a moment.
+    var switching by remember { mutableStateOf(false) }
+    val switchToken = remember { IntArray(1) }
     DisposableEffect(controller, lifecycleOwner) {
         val observer = androidx.lifecycle.Observer<androidx.camera.core.ZoomState> { zoom = it.zoomRatio }
         controller.zoomState.observe(lifecycleOwner, observer)
@@ -408,64 +414,70 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
     LaunchedEffect(choices, lens, nightOn) {
         val c = choices ?: return@LaunchedEffect
         val chosen = lens ?: return@LaunchedEffect
-        val nightSelector = if (nightOn) c.nightSelector(chosen) else null
-        val selector = nightSelector ?: chosen.selector
-        val cases = if (liveOff) CameraController.IMAGE_CAPTURE else CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE
-        if (liveOff) frame = EMPTY_FRAME
-        // Never ask for a combination the camera can't do, even for a moment: into night mode without
-        // frame analysis, analysis off first; out of it, the camera first, then analysis back on. (A
-        // failed combination leaves the camera closed.)
-        val before = controller.cameraInfo
-        val changes = controller.cameraSelector != selector
-        // Quick taps on the night chip would open and close the camera faster than it can follow.
-        delay(250)
-        var switched = runCatching {
-            if (nightSelector != null) {
-                controller.setEnabledUseCases(cases)
-                controller.cameraSelector = selector
-            } else {
-                if (controller.cameraSelector != selector) controller.cameraSelector = selector
-                controller.setEnabledUseCases(cases)
+        val mine = ++switchToken[0]
+        switching = true
+        try {
+            val nightSelector = if (nightOn) c.nightSelector(chosen) else null
+            val selector = nightSelector ?: chosen.selector
+            val cases = if (liveOff) CameraController.IMAGE_CAPTURE else CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE
+            if (liveOff) frame = EMPTY_FRAME
+            // Never ask for a combination the camera can't do, even for a moment: into night mode without
+            // frame analysis, analysis off first; out of it, the camera first, then analysis back on. (A
+            // failed combination leaves the camera closed.)
+            val before = controller.cameraInfo
+            val changes = controller.cameraSelector != selector
+            // Quick taps on the night chip would open and close the camera faster than it can follow.
+            delay(120)
+            var switched = runCatching {
+                if (nightSelector != null) {
+                    controller.setEnabledUseCases(cases)
+                    controller.cameraSelector = selector
+                } else {
+                    if (controller.cameraSelector != selector) controller.cameraSelector = selector
+                    controller.setEnabledUseCases(cases)
+                }
+            }.onFailure { Log.w(TAG, "camera: can't switch to ${chosen.label}${if (nightOn) " in night mode" else ""}", it) }.isSuccess
+            // The phone can also refuse after the call has returned (the camera then closes with an error):
+            // a new camera that isn't open a few seconds later is given up.
+            if (switched && changes && before != null) {
+                // The new camera's info replaces the old one's once it's bound.
+                repeat(40) { if (controller.cameraInfo == null || controller.cameraInfo === before) delay(50) }
+                val info = controller.cameraInfo
+                // Still the old camera's info: not known to have failed.
+                val opened = info == null || info === before || withTimeoutOrNull(6_000) { info.opens() } == true
+                if (!opened) Log.w(TAG, "camera: ${chosen.label}${if (nightOn) " in night mode" else ""} didn't open")
+                if (!opened) switched = false
             }
-        }.onFailure { Log.w(TAG, "camera: can't switch to ${chosen.label}${if (nightOn) " in night mode" else ""}", it) }.isSuccess
-        // The phone can also refuse after the call has returned (the camera then closes with an error):
-        // a new camera that isn't open a few seconds later is given up.
-        if (switched && changes && before != null) {
-            // The new camera's info replaces the old one's once it's bound.
-            repeat(40) { if (controller.cameraInfo == null || controller.cameraInfo === before) delay(50) }
-            val info = controller.cameraInfo
-            // Still the old camera's info: not known to have failed.
-            val opened = info == null || info === before || withTimeoutOrNull(6_000) { info.opens() } == true
-            if (!opened) Log.w(TAG, "camera: ${chosen.label}${if (nightOn) " in night mode" else ""} didn't open")
-            if (!opened) switched = false
-        }
-        if (!switched) {
-            // Back to a combination that works: this lens without night mode, the camera restarted.
-            runCatching {
-                controller.unbind()
-                controller.cameraSelector = chosen.selector
-                controller.setEnabledUseCases(CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE)
-                controller.bindToLifecycle(lifecycleOwner)
-            }.onFailure { Log.w(TAG, "camera: can't restart", it) }
-            if (nightOn) {
-                night = false
-                snackbar.currentSnackbarData?.dismiss()
-                launch { snackbar.showSnackbar("Night mode isn't available with this lens") }
+            if (!switched) {
+                // Back to a combination that works: this lens without night mode, the camera restarted.
+                runCatching {
+                    controller.unbind()
+                    controller.cameraSelector = chosen.selector
+                    controller.setEnabledUseCases(CameraController.IMAGE_ANALYSIS or CameraController.IMAGE_CAPTURE)
+                    controller.bindToLifecycle(lifecycleOwner)
+                }.onFailure { Log.w(TAG, "camera: can't restart", it) }
+                if (nightOn) {
+                    night = false
+                    snackbar.currentSnackbarData?.dismiss()
+                    launch { snackbar.showSnackbar("Night mode isn't available with this lens") }
+                }
             }
-        }
-        // The zoom applies to the camera once it's open (switching cameras can take a few seconds), and
-        // is checked: a camera that was still opening, or a switch cut short by another tap, drops it.
-        val facing = if (chosen.front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-        repeat(40) {
-            val info = controller.cameraInfo
-            if (info != null && info.lensFacing == facing && withTimeoutOrNull(3_000) { info.opens() } == true) {
-                controller.setZoomRatio(chosen.zoom)
-                delay(200)
-                val now = controller.zoomState.value?.zoomRatio
-                if (now != null && abs(now - chosen.zoom) < 0.05f) return@LaunchedEffect
-            } else {
-                delay(100)
+            // The zoom applies to the camera once it's open (switching cameras can take a few seconds), and
+            // is checked: a camera that was still opening, or a switch cut short by another tap, drops it.
+            val facing = if (chosen.front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+            repeat(40) {
+                val info = controller.cameraInfo
+                if (info != null && info.lensFacing == facing && withTimeoutOrNull(3_000) { info.opens() } == true) {
+                    controller.setZoomRatio(chosen.zoom)
+                    delay(100)
+                    val now = controller.zoomState.value?.zoomRatio
+                    if (now != null && abs(now - chosen.zoom) < 0.05f) return@LaunchedEffect
+                } else {
+                    delay(100)
+                }
             }
+        } finally {
+            if (switchToken[0] == mine) switching = false
         }
     }
 
@@ -689,6 +701,20 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
                 }
             },
         )
+
+        // A veil over the preview while a camera is switching, once it takes noticeably long.
+        var veil by remember { mutableStateOf(false) }
+        LaunchedEffect(switching) {
+            if (switching) { delay(250); veil = true } else veil = false
+        }
+        AnimatedVisibility(veil, Modifier.fillMaxSize(), enter = fadeIn(), exit = fadeOut()) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp)
+                    Text("Switching camera…", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
 
         // While a capture is processed, the photographed frame shrinks into a card over the dimmed
         // camera; the indications below are drawn on top of it.
