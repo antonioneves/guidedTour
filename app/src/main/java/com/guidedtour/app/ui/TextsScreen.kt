@@ -5,6 +5,8 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -286,12 +288,19 @@ private fun VisitHeader(
     val toggle = if (onToggle == null) Modifier else Modifier.clickable(onClickLabel = if (open) "Hide its texts" else "Show its texts", onClick = onToggle)
     val state = Modifier.semantics { stateDescription = if (open) "Open" else "Closed" }
     @Composable
-    fun Arrow(tint: Color) {
-        if (onToggle != null) Icon(Icons.Filled.KeyboardArrowDown, null, Modifier.rotate(turn), tint = tint)
+    fun Arrow(tint: Color, modifier: Modifier = Modifier) {
+        if (onToggle != null) Icon(Icons.Filled.KeyboardArrowDown, null, modifier.rotate(turn), tint = tint)
     }
     if (photo != null) {
         // The place's photo behind its name, white on the photo's darkened bottom.
         PlacePhotoBanner(photo, modifier.padding(top = 8.dp).clip(MaterialTheme.shapes.large).then(toggle).then(state)) {
+            // In the top left corner, on a dark disc like the photo's credit opposite.
+            if (onToggle != null) {
+                Box(
+                    Modifier.align(Alignment.TopStart).padding(8.dp).size(32.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+                    contentAlignment = Alignment.Center,
+                ) { Arrow(Color.White) }
+            }
             Row(
                 Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -300,14 +309,10 @@ private fun VisitHeader(
                     Text(title, style = MaterialTheme.typography.titleMedium, color = Color.White, modifier = Modifier.semantics { heading() })
                     Text(count, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.85f))
                 }
-                Arrow(Color.White)
-                Spacer(Modifier.size(4.dp))
-                if (visit.scans.size > 1) {
-                    FilledTonalButton(onClick = onPlay) {
-                        Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, Modifier.size(ButtonDefaults.IconSize))
-                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                        Text("Play visit")
-                    }
+                FilledTonalButton(onClick = onPlay) {
+                    Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text("Play visit")
                 }
             }
         }
@@ -317,17 +322,15 @@ private fun VisitHeader(
         modifier.fillMaxWidth().padding(top = 8.dp).clip(MaterialTheme.shapes.medium).then(toggle).then(state).padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Arrow(MaterialTheme.colorScheme.onSurfaceVariant, Modifier.padding(end = 8.dp).align(Alignment.Top))
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             Text(count, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Arrow(MaterialTheme.colorScheme.onSurfaceVariant)
-        if (visit.scans.size > 1) {
-            TextButton(onClick = onPlay) {
-                Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, Modifier.size(ButtonDefaults.IconSize))
-                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                Text("Play visit")
-            }
+        TextButton(onClick = onPlay) {
+            Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text("Play visit")
         }
     }
 }
