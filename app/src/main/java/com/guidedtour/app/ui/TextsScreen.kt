@@ -130,7 +130,7 @@ fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings
     val visible = remember(scans, query, onlyFavorites) {
         scans.filter { scan ->
             (!onlyFavorites || scan.favorite) &&
-                (query.isBlank() || listOf(scan.text, scan.translation, scan.placeName).any { it?.contains(query, ignoreCase = true) == true })
+                (query.isBlank() || listOf(scan.headline, scan.text, scan.translation, scan.placeName).any { it?.contains(query, ignoreCase = true) == true })
         }
     }
     val visits = remember(visible) { groupVisits(visible) }
@@ -392,15 +392,20 @@ private fun ScanCard(
                     Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "View photo") { viewing = true },
                     maxSide = 256,
                 )
-                HighlightedText(
-                    scan.text,
-                    if (current?.translated == false) player.highlight else null,
-                    MaterialTheme.typography.bodyLarge,
-                    Modifier.weight(1f),
-                    maxLines = if (expanded) Int.MAX_VALUE else 4,
-                )
+                // A headline, where there is one, stands for the text until the card is opened.
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (scan.headline != null) Text(scan.headline, style = MaterialTheme.typography.titleMedium)
+                    if (scan.headline == null || expanded) {
+                        HighlightedText(
+                            scan.text,
+                            if (current?.translated == false) player.highlight else null,
+                            MaterialTheme.typography.bodyLarge,
+                            maxLines = if (expanded) Int.MAX_VALUE else 4,
+                        )
+                    }
+                }
             }
-            if (scan.translation != null) {
+            if (scan.translation != null && (scan.headline == null || expanded)) {
                 Column(Modifier.padding(end = 8.dp)) {
                     Text(
                         "Translation" + (scan.translationTag?.let { " · ${Translator.nameOf(it)}" } ?: ""),

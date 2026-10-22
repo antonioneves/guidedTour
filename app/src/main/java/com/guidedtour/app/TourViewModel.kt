@@ -11,6 +11,7 @@ import com.guidedtour.app.data.AppDatabase
 import com.guidedtour.app.data.Accuracy
 import com.guidedtour.app.data.AiProofreader
 import com.guidedtour.app.data.CloudOcr
+import com.guidedtour.app.data.Headliner
 import com.guidedtour.app.data.WordLists
 import com.guidedtour.app.data.PhotoRegion
 import com.guidedtour.app.data.ViewArea
@@ -117,6 +118,28 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
             if (!settings.correctWords.value) return@launch
             val recent = loadedScans.filterNotNull().first().take(20).mapNotNull { it.languageTag }
             (listOf(Locale.getDefault().language) + recent).distinct().take(2).forEach { wordLists.of(it) }
+        }
+        viewModelScope.launch { writeHeadlines() }
+    }
+
+    /**
+     * Gives each guide without one a headline for its card, one at a time, newest first: new scans,
+     * edited texts, and ones saved before there were headlines. Each text is tried once a session.
+     */
+    private suspend fun writeHeadlines() {
+        delay(3_000)
+        val tried = mutableSetOf<Pair<Long, String>>()
+        var scans = loadedScans.filterNotNull().first()
+        while (true) {
+            val next = scans.firstOrNull { it.headline == null && it.text.isNotBlank() && (it.id to it.text) !in tried }
+            if (next != null && Headliner.available()) {
+                tried += next.id to next.text
+                val headline = Headliner.headline(next.text, next.languageTag)
+                if (headline != null) dao.setHeadline(next.id, headline)
+                android.util.Log.i("GuidedTour", "headline: scan ${next.id} " + if (headline != null) "written" else "not written")
+            }
+            val seen = scans
+            scans = if (next != null && (next.id to next.text) in tried) loadedScans.value ?: seen else loadedScans.filterNotNull().first { it != seen }
         }
     }
     val scanTabVisible = MutableStateFlow(true)
