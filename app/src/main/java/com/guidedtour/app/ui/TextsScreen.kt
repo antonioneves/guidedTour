@@ -169,9 +169,12 @@ fun TextsScreen(viewModel: TourViewModel, bottomInset: Dp = 0.dp, onOpenSettings
     val placeOf = remember(scans) { groupPlaces(scans).flatMap { place -> place.scans.map { it.id to place } }.toMap() }
     val processing = scanState is ScanState.Processing
     // Visits shown open (by id): on opening the app only the newest; the others show only their header.
+    // With no guides yet, the first visit to appear (after a first scan or an import) opens.
     var opened by rememberSaveable { mutableStateOf<List<String>?>(null) }
     LaunchedEffect(loaded, visits) {
-        if (opened == null && loaded && query.isBlank() && !onlyFavorites) opened = listOfNotNull(visits.firstOrNull()?.id)
+        if (!loaded || query.isNotBlank() || onlyFavorites) return@LaunchedEffect
+        if (visits.isEmpty()) opened = null
+        else if (opened == null) opened = listOf(visits.first().id)
     }
     // While searching, every visit with a match is open, so no result is hidden.
     val filtering = query.isNotBlank() || onlyFavorites
