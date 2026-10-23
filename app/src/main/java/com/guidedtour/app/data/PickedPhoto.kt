@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -43,7 +44,14 @@ fun readPickedPhoto(context: Context, uri: Uri): PickedPhoto? = runCatching {
             .also { if (it !== raw) raw.recycle() }
     }
     val place = exif?.latLong
-    PickedPhoto(bitmap, exif?.let(::takenAt), place?.get(0), place?.get(1))
+    PickedPhoto(bitmap, exif?.let(::takenAt) ?: galleryDate(context, uri), place?.get(0), place?.get(1))
+}.getOrNull()
+
+/** When the gallery says the photo at [uri] was taken, for photos whose EXIF has no date (screenshots, shared photos). */
+private fun galleryDate(context: Context, uri: Uri): Long? = runCatching {
+    context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATE_TAKEN), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0).takeIf { it > 0 } else null
+    }
 }.getOrNull()
 
 /** When the photo was taken, from its EXIF date and time (in its own time zone if it gives one, else the phone's). */
