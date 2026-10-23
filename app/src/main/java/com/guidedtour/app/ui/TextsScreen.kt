@@ -563,7 +563,7 @@ private fun ScanCard(
                             verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
                         ) {
                             if (title != null) {
-                                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             } else if (!expanded) {
                                 // As running text: with its line breaks, a paragraph's end left a line of just "…".
                                 val start = remember(scan.text) { scan.text.replace(Regex("""\s+"""), " ").trim() }
