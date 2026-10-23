@@ -8,6 +8,7 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.FilledIconToggleButton
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.FlashlightOff
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Matrix
@@ -521,7 +522,7 @@ private fun CameraContent(viewModel: TourViewModel, visible: Boolean, uprightTur
     }
 
     // A photo from the gallery is read like a capture.
-    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    val pickPhoto = rememberLauncherForActivityResult(PickPhotoWithPlace()) { uri ->
         if (uri != null) {
             // Nothing to hold still for: straight to "Reading the text…".
             photosTaken = true
@@ -1146,3 +1147,12 @@ private fun PreviewView.brightness(): Float? = runCatching {
     small.getPixels(pixels, 0, 24, 0, 0, 24, 24)
     pixels.sumOf { (android.graphics.Color.red(it) * 3 + android.graphics.Color.green(it) * 6 + android.graphics.Color.blue(it)) / 10 }.toFloat() / pixels.size
 }.getOrNull()
+
+/**
+ * The gallery's photo picker, asking to keep where the photos were taken (from Android 17 the
+ * picker lets the user allow it; earlier ones ignore the request and leave the place out).
+ */
+private class PickPhotoWithPlace : ActivityResultContracts.PickVisualMedia() {
+    override fun createIntent(context: Context, input: PickVisualMediaRequest): Intent =
+        super.createIntent(context, input).putExtra("android.provider.extra.REQUEST_LOCATION_METADATA_ACCESS", true)
+}

@@ -14,8 +14,8 @@ import kotlin.math.min
 
 /**
  * A photo picked from the phone's gallery, upright and at most [Recognizer.FULL_SIDE] on its long
- * side, with when and where it was taken if the photo says (the photo picker usually leaves the
- * place out).
+ * side, with when and where it was taken if the photo says (the photo picker leaves the place out
+ * unless the user lets it share it).
  */
 class PickedPhoto(val bitmap: Bitmap, val taken: Long?, val latitude: Double?, val longitude: Double?)
 
