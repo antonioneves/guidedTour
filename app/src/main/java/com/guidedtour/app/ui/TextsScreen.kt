@@ -308,6 +308,16 @@ private fun VisitHeader(
 ) {
     val day = visit.day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
     val title = visit.place?.let { "$it · $day" } ?: day
+    // The place's pin before its name, as the cards had before the place moved up here.
+    @Composable
+    fun Title(color: Color, pin: Color) {
+        Row(Modifier.semantics(mergeDescendants = true) { heading() }, verticalAlignment = Alignment.CenterVertically) {
+            if (visit.place != null) {
+                Icon(Icons.Outlined.Place, null, Modifier.padding(end = 6.dp).size(18.dp), tint = pin)
+            }
+            Text(title, style = MaterialTheme.typography.titleMedium, color = color)
+        }
+    }
     val count = if (visit.scans.size == 1) "1 text" else "${visit.scans.size} texts"
     val photo = rememberPlacePhoto(viewModel, place?.photoSpot())
     val turn by animateFloatAsState(if (open) 180f else 0f, label = "visit arrow")
@@ -332,7 +342,7 @@ private fun VisitHeader(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleMedium, color = Color.White, modifier = Modifier.semantics { heading() })
+                    Title(Color.White, Color.White)
                     Text(count, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.85f))
                 }
                 FilledTonalButton(onClick = onPlay) {
@@ -351,7 +361,7 @@ private fun VisitHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            Title(Color.Unspecified, MaterialTheme.colorScheme.primary)
             Text(count, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
         TextButton(onClick = onPlay) {
@@ -415,25 +425,18 @@ private fun ScanCard(
     ) {
         Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Place, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.size(6.dp))
-                Text(
-                    scan.placeLabel(),
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                // The place is the visit's, in its header above: the card leads with its time.
+                Text(scan.timeLabel(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 // Waiting its turn in what's being read.
                 if (queued) {
                     Icon(
                         Icons.AutoMirrored.Filled.QueueMusic,
                         "In queue",
-                        Modifier.padding(end = 6.dp).size(16.dp),
+                        Modifier.padding(start = 6.dp).size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Text(scan.timeLabel(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
                 // Closer together than icon buttons' usual 48 dp, still easy to tap.
                 CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 40.dp) {
                     FavoriteButton(scan) { viewModel.toggleFavorite(scan) }
