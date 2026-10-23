@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.outlined.Notes
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
@@ -423,6 +424,15 @@ private fun ScanCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                // Waiting its turn in what's being read.
+                if (queued) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.QueueMusic,
+                        "In queue",
+                        Modifier.padding(end = 6.dp).size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text(scan.timeLabel(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 // Closer together than icon buttons' usual 48 dp, still easy to tap.
                 CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 40.dp) {
@@ -497,7 +507,6 @@ private fun ScanCard(
                 translated -> translationLabel
                 else -> originalLabel
             }
-            val extras = if (queued) "In queue" else ""
             LookaheadScope {
                 val lookahead = this
                 // Small and grey under the title; full size, in colour, heading its text: growing as it moves.
@@ -556,9 +565,6 @@ private fun ScanCard(
                                 Text(start, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                             if (!slides && label != null) movingLabel(label, false)
-                            if (extras.isNotEmpty()) {
-                                Text(extras, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
                         }
                         Box(Modifier.height(56.dp), contentAlignment = Alignment.Center) {
                             ListenButton(scan, player, viewModel, useTranslation)
