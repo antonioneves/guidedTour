@@ -789,6 +789,28 @@ private fun TranslationSection(viewModel: TourViewModel) {
 }
 
 /**
+ * Picks the language to translate one guide into: [suggested] (the one chosen in Settings) first,
+ * then every language ML Kit translates into, but not the guide's own ([exclude]); [current], its
+ * translation's language, is checked.
+ */
+@Composable
+fun TranslateIntoDialog(current: String?, suggested: String, exclude: List<String>, onDismiss: () -> Unit, onChoose: (String) -> Unit) {
+    val skip = exclude.map { it.substringBefore('-') }.toSet()
+    val others = Translator.languages.filter { it != suggested && it !in skip }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Translate into") },
+        text = {
+            LazyColumn {
+                if (suggested !in skip) item { LanguageRow(Translator.nameOf(suggested), current == suggested) { onChoose(suggested) } }
+                items(others) { code -> LanguageRow(Translator.nameOf(code), current == code) { onChoose(code) } }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
  * Corrects a guide's language: detect it again paragraph by paragraph (the default, which handles
  * bilingual plaques), or set one language for the whole text. [onChoose] gets null for detecting.
  */

@@ -510,11 +510,12 @@ class TourViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     /** Translates into the chosen language (the phone's by default), stores the result and queues it for reading. */
-    fun translate(scan: Scan) {
+    /** Translates [scan] into [into] (a language code), or the language chosen in Settings. */
+    fun translate(scan: Scan, into: String? = null) {
         if (scan.id in _translating.value) return
         _translating.value += scan.id
         viewModelScope.launch {
-            val target = Translator.target(settings.translateTo.value)
+            val target = into ?: Translator.target(settings.translateTo.value)
             when (val result = Translator.translate(scan.text, scan.spans(), target)) {
                 is Translator.Result.Success -> {
                     val headline = scan.headline?.let { translatedHeadline(it, scan, target) }

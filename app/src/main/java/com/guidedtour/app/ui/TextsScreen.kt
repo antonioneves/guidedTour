@@ -387,6 +387,7 @@ private fun ScanCard(
     var editing by remember { mutableStateOf(false) }
     var choosing by remember { mutableStateOf(false) }
     var choosingLanguage by remember { mutableStateOf(false) }
+    var choosingTranslation by remember { mutableStateOf(false) }
     var confirmCloud by remember { mutableStateOf(false) }
     var viewing by remember { mutableStateOf(false) }
     // Whether Listen reads the translation: by default once there is one.
@@ -464,14 +465,13 @@ private fun ScanCard(
                                     onClick = { menu = false; confirmCloud = true },
                                 )
                             }
-                            if (Translator.needsTranslation(scan.allLanguages(), target)) {
-                                DropdownMenuItem(
-                                    text = { Text(if (scan.translationTag == target) "Translate again" else "Translate into ${Translator.nameOf(target)}") },
-                                    leadingIcon = { Icon(Icons.Filled.Translate, null) },
-                                    enabled = !translating,
-                                    onClick = { menu = false; viewModel.translate(scan) },
-                                )
-                            }
+                            // Into any language, the one chosen in Settings first.
+                            DropdownMenuItem(
+                                text = { Text("Translate into…") },
+                                leadingIcon = { Icon(Icons.Filled.Translate, null) },
+                                enabled = !translating,
+                                onClick = { menu = false; choosingTranslation = true },
+                            )
                             HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("Delete") },
@@ -610,6 +610,13 @@ private fun ScanCard(
     if (choosing) ChooseParagraphsDialog(scan.text, onDismiss = { choosing = false }) { viewModel.editText(scan, it) }
     if (confirmCloud) CloudConfirmDialog(onDismiss = { confirmCloud = false }) { viewModel.improveWithCloud(scan) }
     if (choosingLanguage) LanguageDialog(scan, onDismiss = { choosingLanguage = false }) { viewModel.setLanguage(scan, it) }
+    if (choosingTranslation) {
+        TranslateIntoDialog(scan.translationTag, target, scan.allLanguages(), onDismiss = { choosingTranslation = false }) { code ->
+            choosingTranslation = false
+            useTranslation = true
+            viewModel.translate(scan, code)
+        }
+    }
 }
 
 @Composable
