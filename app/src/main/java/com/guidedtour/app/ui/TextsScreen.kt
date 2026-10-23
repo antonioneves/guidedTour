@@ -565,8 +565,10 @@ private fun ScanCard(
                             if (title != null) {
                                 Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             } else if (!expanded) {
-                                // As running text: with its line breaks, a paragraph's end left a line of just "…".
-                                val start = remember(scan.text) { scan.text.replace(Regex("""\s+"""), " ").trim() }
+                                // The version shown (as its label says), as running text: with its line
+                                // breaks, a paragraph's end left a line of just "…".
+                                val shown = if (translated) translation else scan.text
+                                val start = remember(shown) { shown.replace(Regex("""\s+"""), " ").trim() }
                                 Text(start, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                             if (!slides && label != null) movingLabel(label, false)
