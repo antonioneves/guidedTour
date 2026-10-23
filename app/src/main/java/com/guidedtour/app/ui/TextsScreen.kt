@@ -489,13 +489,15 @@ private fun ScanCard(
             val title = if (translated) scan.translatedHeadline ?: scan.headline else scan.headline
             val originalLabel = "Original" + (scan.languageLabel()?.let { " · $it" } ?: "")
             val translationLabel = "Translation" + (scan.translationTag?.let { " · ${Translator.nameOf(it)}" } ?: "")
-            // Without a translation there's one version: its language, which stays put.
+            // Without a translation there's one version: its language, which stays put. While
+            // translating, "Translating…" takes its place, in the same style.
             val label = when {
+                translating -> "Translating…"
                 translation == null -> scan.languageLabel()
                 translated -> translationLabel
                 else -> originalLabel
             }
-            val extras = listOfNotNull(if (queued) "In queue" else null, if (translating) "Translating…" else null).joinToString(" · ")
+            val extras = if (queued) "In queue" else ""
             LookaheadScope {
                 val lookahead = this
                 // Small and grey under the title; full size, in colour, heading its text: growing as it moves.
@@ -614,6 +616,8 @@ private fun ScanCard(
         TranslateIntoDialog(scan.translationTag, target, scan.allLanguages(), onDismiss = { choosingTranslation = false }) { code ->
             choosingTranslation = false
             useTranslation = true
+            // The language chosen becomes the one the translate button translates into.
+            viewModel.settings.setTranslateTo(if (code == Translator.target("")) "" else code)
             viewModel.translate(scan, code)
         }
     }
