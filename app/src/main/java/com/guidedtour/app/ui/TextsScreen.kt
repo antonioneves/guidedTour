@@ -551,7 +551,9 @@ private fun ScanCard(
                             if (title != null) {
                                 Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             } else if (!expanded) {
-                                Text(scan.text, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                // As running text: with its line breaks, a paragraph's end left a line of just "…".
+                                val start = remember(scan.text) { scan.text.replace(Regex("""\s+"""), " ").trim() }
+                                Text(start, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                             if (!slides && label != null) movingLabel(label, false)
                             if (extras.isNotEmpty()) {
