@@ -307,7 +307,8 @@ private fun VisitHeader(
     modifier: Modifier = Modifier,
 ) {
     val day = visit.day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
-    val title = visit.place?.let { "$it · $day" } ?: day
+    // The place as the title, its day under it with the count; without a place, the day is the title.
+    val title = visit.place ?: day
     // The place's pin before its name, as the cards had before the place moved up here.
     @Composable
     fun Title(color: Color, pin: Color) {
@@ -318,7 +319,8 @@ private fun VisitHeader(
             Text(title, style = MaterialTheme.typography.titleMedium, color = color)
         }
     }
-    val count = if (visit.scans.size == 1) "1 text" else "${visit.scans.size} texts"
+    val texts = if (visit.scans.size == 1) "1 text" else "${visit.scans.size} texts"
+    val count = if (visit.place != null) "$day · $texts" else texts
     val photo = rememberPlacePhoto(viewModel, place?.photoSpot())
     val turn by animateFloatAsState(if (open) 180f else 0f, label = "visit arrow")
     val toggle = if (onToggle == null) Modifier else Modifier.clickable(onClickLabel = if (open) "Hide its texts" else "Show its texts", onClick = onToggle)
